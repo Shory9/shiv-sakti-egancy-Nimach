@@ -1,38 +1,10 @@
-import { useState } from "react";
 import "./App.css";
+ function App() {
+  
+  
 
-type CaseItem = {
-  name: string;
-  loan: string;
-  bank: string;
-  amount: string;
-  executive: string;
-  status: string;
-};
-
-const initialCases: CaseItem[] = [
-  { name: "Ramesh Patel", loan: "LN-10021", bank: "HDFC", amount: "₹42,000", executive: "Amit", status: "Pending" },
-  { name: "Suresh Jain", loan: "LN-10022", bank: "ICICI", amount: "₹18,500", executive: "Rahul", status: "Visited" },
-];
-
-function App() {
-  const [caseList, setCaseList] = useState<CaseItem[]>(initialCases);
-  const [showForm, setShowForm] = useState(false);
-
-  const addDemoCase = () => {
-    const newCase: CaseItem = {
-      name: "New Customer",
-      loan: "LN-" + (10020 + caseList.length + 1),
-      bank: "SBI",
-      amount: "₹25,000",
-      executive: "Vikram",
-      status: "Pending",
-    };
-
-    setCaseList([...caseList, newCase]);
-    setShowForm(false);
-  };
-
+ 
+  
   return (
     <div className="app">
       <aside className="sidebar">
