@@ -1,9 +1,27 @@
-function StatsCards() {
+import type { CaseItem } from "./CasesTable";
+
+type StatsCardsProps = {
+  cases: CaseItem[];
+};
+
+function StatsCards({ cases }: StatsCardsProps) {
+  const totalCases = cases.length;
+  const pending = cases.filter((c) => c.status === "Pending").length;
+  const visited = cases.filter((c) => c.status === "Visited").length;
+  const recoveredAmount = cases
+    .filter((c) => c.status === "Paid")
+    .reduce((sum, c) => sum + c.amount, 0);
+
   const cards = [
-    { title: "Total Cases", value: "248", text: "Active recovery cases", icon: "📋" },
-    { title: "Total Recovery", value: "₹12.8L", text: "This month collection", icon: "💰" },
-    { title: "Field Agents", value: "18", text: "Executives on duty", icon: "👨‍💼" },
-    { title: "Pending Visits", value: "64", text: "Today's follow-ups", icon: "📍" },
+    { title: "Total Cases", value: totalCases, text: "All recovery cases", icon: "📋" },
+    { title: "Pending", value: pending, text: "Need follow-up", icon: "⏳" },
+    { title: "Visited", value: visited, text: "Customer visited", icon: "🚗" },
+    {
+      title: "Recovered",
+      value: `₹${recoveredAmount.toLocaleString("en-IN")}`,
+      text: "Recovered amount",
+      icon: "💰",
+    },
   ];
 
   return (

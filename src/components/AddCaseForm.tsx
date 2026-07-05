@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { supabase } from "../supabaseClient";
 
 export type NewCase = {
   customer: string;
@@ -6,6 +7,10 @@ export type NewCase = {
   bank: string;
   amount: number;
   agent: string;
+  loanType?: string;
+  pendingAmount?: number;
+  address?: string;
+  remarks?: string;
 };
 
 type AddCaseFormProps = {
@@ -18,27 +23,58 @@ function AddCaseForm({ onAddCase, onCancel }: AddCaseFormProps) {
     customer: "",
     phone: "",
     bank: "",
+    loanType: "",
     amount: "",
+    pendingAmount: "",
     agent: "",
+    address: "",
+    remarks: "",
   });
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
 
-    onAddCase({
+    const newCase: NewCase = {
       customer: form.customer,
       phone: form.phone,
       bank: form.bank,
+      loanType: form.loanType,
       amount: Number(form.amount),
-      agent: form.agent,
+      pendingAmount: Number(form.pendingAmount || form.amount),
+      agent: form.agent || "Unassigned",
+      address: form.address,
+      remarks: form.remarks,
+    };
+
+    const { error } = await supabase.from("cases").insert({
+      customer_name: newCase.customer,
+      mobile: newCase.phone,
+      bank_name: newCase.bank,
+      loan_type: newCase.loanType,
+      loan_amount: newCase.amount,
+      pending_amount: newCase.pendingAmount,
+      address: newCase.address,
+      status: "Pending",
+      remarks: newCase.remarks,
     });
+
+    if (error) {
+      alert("Supabase error: " + error.message);
+      return;
+    }
+
+    onAddCase(newCase);
 
     setForm({
       customer: "",
       phone: "",
       bank: "",
+      loanType: "",
       amount: "",
+      pendingAmount: "",
       agent: "",
+      address: "",
+      remarks: "",
     });
   }
 
@@ -47,7 +83,6 @@ function AddCaseForm({ onAddCase, onCancel }: AddCaseFormProps) {
       <h2>Add New Recovery Case</h2>
 
       <input
-        type="text"
         placeholder="Customer Name"
         value={form.customer}
         onChange={(e) => setForm({ ...form, customer: e.target.value })}
@@ -55,7 +90,6 @@ function AddCaseForm({ onAddCase, onCancel }: AddCaseFormProps) {
       />
 
       <input
-        type="text"
         placeholder="Phone Number"
         value={form.phone}
         onChange={(e) => setForm({ ...form, phone: e.target.value })}
@@ -63,7 +97,6 @@ function AddCaseForm({ onAddCase, onCancel }: AddCaseFormProps) {
       />
 
       <input
-        type="text"
         placeholder="Bank Name"
         value={form.bank}
         onChange={(e) => setForm({ ...form, bank: e.target.value })}
@@ -71,19 +104,42 @@ function AddCaseForm({ onAddCase, onCancel }: AddCaseFormProps) {
       />
 
       <input
+        placeholder="Loan Type"
+        value={form.loanType}
+        onChange={(e) => setForm({ ...form, loanType: e.target.value })}
+      />
+
+      <input
         type="number"
-        placeholder="Amount"
+        placeholder="Loan Amount"
         value={form.amount}
         onChange={(e) => setForm({ ...form, amount: e.target.value })}
         required
       />
 
       <input
-        type="text"
+        type="number"
+        placeholder="Pending Amount"
+        value={form.pendingAmount}
+        onChange={(e) => setForm({ ...form, pendingAmount: e.target.value })}
+      />
+
+      <input
         placeholder="Executive Name"
         value={form.agent}
         onChange={(e) => setForm({ ...form, agent: e.target.value })}
-        required
+      />
+
+      <input
+        placeholder="Address"
+        value={form.address}
+        onChange={(e) => setForm({ ...form, address: e.target.value })}
+      />
+
+      <input
+        placeholder="Remarks"
+        value={form.remarks}
+        onChange={(e) => setForm({ ...form, remarks: e.target.value })}
       />
 
       <div className="form-actions">
@@ -91,7 +147,11 @@ function AddCaseForm({ onAddCase, onCancel }: AddCaseFormProps) {
           Save Case
         </button>
 
-        <button className="secondary-btn" type="button" onClick={onCancel}>
+        <button
+          className="secondary-btn"
+          type="button"
+          onClick={onCancel}
+        >
           Cancel
         </button>
       </div>

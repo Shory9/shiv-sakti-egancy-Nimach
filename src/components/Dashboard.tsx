@@ -1,64 +1,70 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { supabase } from "../supabaseClient";
 import AddCaseForm, { type NewCase } from "./AddCaseForm";
 import CasesTable, { type CaseItem } from "./CasesTable";
 import Header from "./Header";
 import StatsCards from "./StatsCards";
 
-const initialCases: CaseItem[] = [
-  {
-    id: "SS-001",
-    customer: "Ramesh Verma",
-    phone: "9876543210",
-    bank: "HDFC Bank",
-    amount: 45000,
-    agent: "Amit",
-    status: "Pending",
-  },
-  {
-    id: "SS-002",
-    customer: "Suresh Patel",
-    phone: "9123456780",
-    bank: "ICICI Bank",
-    amount: 72000,
-    agent: "Rahul",
-    status: "Visited",
-  },
-  {
-    id: "SS-003",
-    customer: "Mahesh Sharma",
-    phone: "9988776655",
-    bank: "Axis Bank",
-    amount: 28000,
-    agent: "Vikram",
-    status: "Paid",
-  },
-  {
-    id: "SS-004",
-    customer: "Dinesh Jain",
-    phone: "9090909090",
-    bank: "SBI Bank",
-    amount: 61000,
-    agent: "Amit",
-    status: "Overdue",
-  },
-];
+type SupabaseCase = {
+  id: number;
+  customer_name: string;
+  mobile: string | null;
+  bank_name: string | null;
+  loan_amount: number | null;
+  assigned_agent: string | null;
+  status: "Pending" | "Visited" | "Paid" | "Overdue" | string | null;
+};
 
 function Dashboard() {
-  const [cases, setCases] = useState<CaseItem[]>(initialCases);
+  const [cases, setCases] = useState<CaseItem[]>([]);
   const [showForm, setShowForm] = useState(false);
 
-  function handleAddCase(newCase: NewCase) {
-    const nextCase: CaseItem = {
-      id: `SS-${String(cases.length + 1).padStart(3, "0")}`,
-      ...newCase,
-      status: "Pending",
-    };
+  async function loadCases() {
+    const { data, error } = await supabase
+      .from("cases")
+      .select("*")
+      .order("id", { ascending: false });
 
-    setCases([nextCase, ...cases]);
+    if (error) {
+      alert("Cases load error: " + error.message);
+      return;
+    }
+
+    const convertedCases: CaseItem[] = (data as SupabaseCase[]).map((item) => ({
+      id: String(item.id),
+      customer: item.customer_name,
+      phone: item.mobile || "",
+      bank: item.bank_name || "",
+      amount: Number(item.loan_amount || 0),
+      agent: item.assigned_agent || "Unassigned",
+      status:
+        item.status === "Visited" ||
+        item.status === "Paid" ||
+        item.status === "Overdue"
+          ? item.status
+          : "Pending",
+    }));
+
+    setCases(convertedCases);
+  }
+
+  useEffect(() => {
+    loadCases();
+  }, []);
+
+  function handleAddCase(_newCase: NewCase) {
+    loadCases();
     setShowForm(false);
   }
 
-  function handleDeleteCase(id: string) {
+  async function handleDeleteCase(id: string) {
+    const { error } = await supabase.from("cases").delete().eq("id", Number(id));
+
+    if (error) {
+      alert("Delete error: " + error.message);
+      return;
+    }
+
     setCases(cases.filter((item) => item.id !== id));
   }
 
@@ -75,7 +81,7 @@ function Dashboard() {
         </button>
       </div>
 
-      <StatsCards />
+      <StatsCards cases={cases} />
 
       {showForm && (
         <AddCaseForm

@@ -5,6 +5,7 @@ type SidebarProps = {
 
 const menus = [
   "Dashboard",
+  "Bank Import",
   "Cases",
   "Executives",
   "GPS Tracking",
