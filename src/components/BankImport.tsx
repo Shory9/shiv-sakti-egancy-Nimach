@@ -1,9 +1,9 @@
 import { type ChangeEvent, useMemo, useState } from "react";
+import { supabase } from "../supabaseClient";
 
-type ImportStatus = "idle" | "selected" | "processing" | "ready" | "imported";
+type ImportStatus = "idle" | "selected" | "processing" | "ready" | "importing" | "imported";
 
 type ImportedCase = {
-  id: string;
   customer: string;
   phone: string;
   bank: string;
@@ -19,10 +19,10 @@ function BankImport() {
 
   const cases = useMemo<ImportedCase[]>(
     () => [
-      { id: "IMP-001", customer: "Ramesh Verma", phone: "9876543210", bank: bankName, amount: 45000, area: "Neemuch", status: "New" },
-      { id: "IMP-002", customer: "Suresh Patel", phone: "9826012345", bank: bankName, amount: 72000, area: "Manasa", status: "New" },
-      { id: "IMP-003", customer: "Mahesh Sharma", phone: "9009011122", bank: bankName, amount: 38000, area: "Jawad", status: "New" },
-      { id: "IMP-004", customer: "Amit Jain", phone: "9893012345", bank: bankName, amount: 56000, area: "Nimbahera", status: "New" },
+      { customer: "Ramesh Verma", phone: "9876543210", bank: bankName, amount: 45000, area: "Neemuch", status: "New" },
+      { customer: "Suresh Patel", phone: "9826012345", bank: bankName, amount: 72000, area: "Manasa", status: "New" },
+      { customer: "Mahesh Sharma", phone: "9009011122", bank: bankName, amount: 38000, area: "Jawad", status: "New" },
+      { customer: "Amit Jain", phone: "9893012345", bank: bankName, amount: 56000, area: "Nimbahera", status: "New" },
     ],
     [bankName]
   );
@@ -43,15 +43,36 @@ function BankImport() {
     }, 800);
   }
 
-  function importCases() {
-    localStorage.setItem("bankImportedCases", JSON.stringify(cases));
+  async function importCases() {
+    setStatus("importing");
+
+    const rows = cases.map((item) => ({
+      customer_name: item.customer,
+      mobile: item.phone,
+      bank_name: item.bank,
+      loan_type: "Recovery",
+      loan_amount: item.amount,
+      pending_amount: item.amount,
+      address: item.area,
+      status: "Pending",
+      remarks: `Imported from bank PDF: ${fileName}`,
+    }));
+
+    const { error } = await supabase.from("cases").insert(rows);
+
+    if (error) {
+      alert("Import error: " + error.message);
+      setStatus("ready");
+      return;
+    }
+
     setStatus("imported");
   }
 
   return (
     <div className="module-card">
       <h1>📄 Bank PDF Import</h1>
-      <p>Bank se aayi PDF upload karo, cases preview dekho, phir CRM me import karo.</p>
+      <p>Bank PDF upload karo, cases preview dekho, phir direct CRM database me import karo.</p>
 
       <hr />
 
@@ -94,7 +115,6 @@ function BankImport() {
           <table>
             <thead>
               <tr>
-                <th>Case ID</th>
                 <th>Customer</th>
                 <th>Phone</th>
                 <th>Bank</th>
@@ -103,10 +123,10 @@ function BankImport() {
                 <th>Status</th>
               </tr>
             </thead>
+
             <tbody>
-              {cases.map((item) => (
-                <tr key={item.id}>
-                  <td>{item.id}</td>
+              {cases.map((item, index) => (
+                <tr key={index}>
                   <td>{item.customer}</td>
                   <td>{item.phone}</td>
                   <td>{item.bank}</td>
@@ -121,15 +141,21 @@ function BankImport() {
           <br />
 
           <button className="primary-btn" onClick={importCases}>
-            Import Cases to CRM
+            Import Cases to CRM Database
           </button>
+        </div>
+      )}
+
+      {status === "importing" && (
+        <div className="card">
+          <h3>⏳ Importing cases...</h3>
         </div>
       )}
 
       {status === "imported" && (
         <div className="card">
           <h3>✅ Import Successful</h3>
-          <p>{cases.length} bank cases imported successfully.</p>
+          <p>{cases.length} bank cases imported into Supabase CRM.</p>
         </div>
       )}
     </div>
