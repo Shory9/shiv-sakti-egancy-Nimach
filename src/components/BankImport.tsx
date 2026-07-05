@@ -1,31 +1,45 @@
-import { type ChangeEvent, useMemo, useState } from "react";
+import { type ChangeEvent, useState } from "react";
+import * as XLSX from "xlsx";
 import { supabase } from "../supabaseClient";
 
-type ImportStatus = "idle" | "selected" | "processing" | "ready" | "importing" | "imported";
+type ImportStatus =
+  | "idle"
+  | "selected"
+  | "processing"
+  | "ready"
+  | "importing"
+  | "imported";
 
 type ImportedCase = {
   customer: string;
   phone: string;
   bank: string;
+  loanType: string;
   amount: number;
+  pendingAmount: number;
   area: string;
-  status: "New";
+  remarks: string;
 };
 
 function BankImport() {
   const [bankName, setBankName] = useState("HDFC Bank");
   const [fileName, setFileName] = useState("");
   const [status, setStatus] = useState<ImportStatus>("idle");
+  const [cases, setCases] = useState<ImportedCase[]>([]);
 
-  const cases = useMemo<ImportedCase[]>(
-    () => [
-      { customer: "Ramesh Verma", phone: "9876543210", bank: bankName, amount: 45000, area: "Neemuch", status: "New" },
-      { customer: "Suresh Patel", phone: "9826012345", bank: bankName, amount: 72000, area: "Manasa", status: "New" },
-      { customer: "Mahesh Sharma", phone: "9009011122", bank: bankName, amount: 38000, area: "Jawad", status: "New" },
-      { customer: "Amit Jain", phone: "9893012345", bank: bankName, amount: 56000, area: "Nimbahera", status: "New" },
-    ],
-    [bankName]
-  );
+  function findValue(row: Record<string, unknown>, keys: string[]) {
+    const rowKeys = Object.keys(row);
+
+    for (const key of keys) {
+      const foundKey = rowKeys.find((item) =>
+        item.toLowerCase().replace(/\s/g, "").includes(key.toLowerCase())
+      );
+
+      if (foundKey) return String(row[foundKey] || "");
+    }
+
+    return "";
+  }
 
   function handleFile(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -33,29 +47,74 @@ function BankImport() {
 
     setFileName(file.name);
     setStatus("selected");
-  }
+    setCases([]);
 
-  function readPdf() {
-    setStatus("processing");
+    const reader = new FileReader();
 
-    setTimeout(() => {
+    reader.onload = (event) => {
+      const data = event.target?.result;
+      const workbook = XLSX.read(data, { type: "array" });
+      const sheetName = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[sheetName];
+
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet);
+
+      const parsedCases: ImportedCase[] = rows
+        .map((row) => {
+          const customer =
+            findValue(row, ["customer", "name", "borrower", "party"]) || "";
+
+          const phone =
+            findValue(row, ["mobile", "phone", "contact"]) || "";
+
+          const amountText =
+            findValue(row, ["loanamount", "amount", "outstanding", "balance"]) ||
+            "0";
+
+          const pendingText =
+            findValue(row, ["pending", "due", "overdue", "outstanding"]) ||
+            amountText;
+
+          return {
+            customer,
+            phone,
+            bank: bankName,
+            loanType: findValue(row, ["loantype", "product", "type"]) || "Recovery",
+            amount: Number(String(amountText).replace(/[^0-9.]/g, "")) || 0,
+            pendingAmount:
+              Number(String(pendingText).replace(/[^0-9.]/g, "")) || 0,
+            area:
+              findValue(row, ["area", "city", "location", "address"]) || "",
+            remarks: `Imported from Excel: ${file.name}`,
+          };
+        })
+        .filter((item) => item.customer || item.phone || item.amount > 0);
+
+      setCases(parsedCases);
       setStatus("ready");
-    }, 800);
+    };
+
+    reader.readAsArrayBuffer(file);
   }
 
   async function importCases() {
+    if (cases.length === 0) {
+      alert("Import ke liye cases nahi mile.");
+      return;
+    }
+
     setStatus("importing");
 
     const rows = cases.map((item) => ({
-      customer_name: item.customer,
+      customer_name: item.customer || "Unknown Customer",
       mobile: item.phone,
       bank_name: item.bank,
-      loan_type: "Recovery",
+      loan_type: item.loanType,
       loan_amount: item.amount,
-      pending_amount: item.amount,
+      pending_amount: item.pendingAmount || item.amount,
       address: item.area,
       status: "Pending",
-      remarks: `Imported from bank PDF: ${fileName}`,
+      remarks: item.remarks,
     }));
 
     const { error } = await supabase.from("cases").insert(rows);
@@ -71,8 +130,8 @@ function BankImport() {
 
   return (
     <div className="module-card">
-      <h1>📄 Bank PDF Import</h1>
-      <p>Bank PDF upload karo, cases preview dekho, phir direct CRM database me import karo.</p>
+      <h1>📄 Bank Excel / PDF Import</h1>
+      <p>Bank file upload karo, cases preview dekho, phir CRM database me import karo.</p>
 
       <hr />
 
@@ -90,23 +149,18 @@ function BankImport() {
       <br />
       <br />
 
-      <h3>Select Bank PDF</h3>
-      <input type="file" accept=".pdf" onChange={handleFile} />
+      <h3>Select Bank Excel File</h3>
+      <input type="file" accept=".xlsx,.xls" onChange={handleFile} />
 
       {status !== "idle" && (
         <div className="card">
-          <h3>Selected PDF</h3>
+          <h3>Selected File</h3>
           <p><strong>Bank:</strong> {bankName}</p>
           <p><strong>File:</strong> {fileName}</p>
           <p><strong>Status:</strong> {status}</p>
+          <p><strong>Rows Found:</strong> {cases.length}</p>
         </div>
       )}
-
-      <br />
-
-      <button className="primary-btn" disabled={status === "idle"} onClick={readPdf}>
-        {status === "processing" ? "Reading PDF..." : "Read PDF & Generate Cases"}
-      </button>
 
       {status === "ready" && (
         <div className="card">
@@ -118,9 +172,10 @@ function BankImport() {
                 <th>Customer</th>
                 <th>Phone</th>
                 <th>Bank</th>
-                <th>Amount</th>
+                <th>Loan Type</th>
+                <th>Loan Amount</th>
+                <th>Pending</th>
                 <th>Area</th>
-                <th>Status</th>
               </tr>
             </thead>
 
@@ -130,9 +185,10 @@ function BankImport() {
                   <td>{item.customer}</td>
                   <td>{item.phone}</td>
                   <td>{item.bank}</td>
+                  <td>{item.loanType}</td>
                   <td>₹{item.amount.toLocaleString("en-IN")}</td>
+                  <td>₹{item.pendingAmount.toLocaleString("en-IN")}</td>
                   <td>{item.area}</td>
-                  <td>{item.status}</td>
                 </tr>
               ))}
             </tbody>
