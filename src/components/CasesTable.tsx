@@ -12,6 +12,11 @@ export type CaseItem = {
   status: "Pending" | "Visited" | "Paid" | "Overdue";
 };
 
+type Executive = {
+  id: number;
+  name: string;
+};
+
 type CasesTableProps = {
   cases: CaseItem[];
   onDeleteCase: (id: string) => void;
@@ -20,10 +25,30 @@ type CasesTableProps = {
 function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
   const [search, setSearch] = useState("");
   const [localCases, setLocalCases] = useState<CaseItem[]>(cases);
+  const [executives, setExecutives] = useState<Executive[]>([]);
 
   useEffect(() => {
     setLocalCases(cases);
   }, [cases]);
+
+  useEffect(() => {
+    loadExecutives();
+  }, []);
+
+  async function loadExecutives() {
+    const { data, error } = await supabase
+      .from("agents")
+      .select("id, name")
+      .eq("status", "Active")
+      .order("name", { ascending: true });
+
+    if (error) {
+      alert("Executive list error: " + error.message);
+      return;
+    }
+
+    setExecutives(data || []);
+  }
 
   const filteredCases = localCases.filter((item) =>
     `${item.id} ${item.customer} ${item.phone} ${item.bank} ${item.agent} ${item.status}`
@@ -32,16 +57,24 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
   );
 
   async function assignExecutive(caseId: string) {
-    const executiveName = prompt("Executive name likho:");
+    if (executives.length === 0) {
+      alert("Pehle Executive Management me executive add karo.");
+      return;
+    }
+
+    const executiveName = prompt(
+      "Executive name likho:\n\n" + executives.map((e) => e.name).join("\n")
+    );
 
     if (!executiveName) return;
 
     const { error } = await supabase
       .from("cases")
       .update({
+        agent: executiveName,
         remarks: `Assigned to ${executiveName}`,
       })
-      .eq("id", Number(caseId));
+      .eq("id", caseId);
 
     if (error) {
       alert("Assign error: " + error.message);
@@ -63,7 +96,7 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
       .update({
         status: "Visited",
       })
-      .eq("id", Number(caseId));
+      .eq("id", caseId);
 
     if (error) {
       alert("Visit error: " + error.message);
@@ -85,7 +118,7 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
       .update({
         status: "Paid",
       })
-      .eq("id", Number(caseId));
+      .eq("id", caseId);
 
     if (error) {
       alert("Payment error: " + error.message);
@@ -107,7 +140,7 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
       .update({
         status: "Overdue",
       })
-      .eq("id", Number(caseId));
+      .eq("id", caseId);
 
     if (error) {
       alert("Status error: " + error.message);
