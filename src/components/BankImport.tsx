@@ -22,7 +22,7 @@ type ImportedCase = {
 };
 
 function BankImport() {
-  const [bankName, setBankName] = useState("HDFC Bank");
+  const [bankName, setBankName] = useState("State Bank of India (SBI)");
   const [fileName, setFileName] = useState("");
   const [status, setStatus] = useState<ImportStatus>("idle");
   const [cases, setCases] = useState<ImportedCase[]>([]);
@@ -85,7 +85,7 @@ function BankImport() {
               Number(String(pendingText).replace(/[^0-9.]/g, "")) || 0,
             area:
               findValue(row, ["area", "city", "location", "address"]) || "",
-            remarks: `Imported from Excel: ${file.name}`,
+            remarks: `Imported from ${bankName} Excel: ${file.name}`,
           };
         })
         .filter((item) => item.customer || item.phone || item.amount > 0);
@@ -130,20 +130,15 @@ function BankImport() {
 
   return (
     <div className="module-card">
-      <h1>📄 Bank Excel / PDF Import</h1>
-      <p>Bank file upload karo, cases preview dekho, phir CRM database me import karo.</p>
+      <h1>📄 Bank Excel Import</h1>
+      <p>SBI ya Bank of Baroda ki Excel file upload karo, preview dekho, phir CRM database me import karo.</p>
 
       <hr />
 
       <h3>Select Bank</h3>
       <select value={bankName} onChange={(e) => setBankName(e.target.value)}>
-        <option>HDFC Bank</option>
-        <option>ICICI Bank</option>
-        <option>Axis Bank</option>
-        <option>SBI Bank</option>
-        <option>Bank of Baroda</option>
-        <option>Punjab National Bank</option>
-        <option>Other Bank</option>
+        <option>State Bank of India (SBI)</option>
+        <option>Bank of Baroda (BOB)</option>
       </select>
 
       <br />

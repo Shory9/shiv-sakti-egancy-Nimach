@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { supabase } from "../supabaseClient";
 import CaseActions from "./CaseActions";
 
 export type CaseItem = {
@@ -18,15 +19,108 @@ type CasesTableProps = {
 
 function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
   const [search, setSearch] = useState("");
+  const [localCases, setLocalCases] = useState<CaseItem[]>(cases);
 
-  const filteredCases = cases.filter((item) =>
+  useEffect(() => {
+    setLocalCases(cases);
+  }, [cases]);
+
+  const filteredCases = localCases.filter((item) =>
     `${item.id} ${item.customer} ${item.phone} ${item.bank} ${item.agent} ${item.status}`
       .toLowerCase()
       .includes(search.toLowerCase())
   );
 
-  function showMessage(action: string, caseId: string) {
-    alert(`${action} feature ready for case ${caseId}`);
+  async function assignExecutive(caseId: string) {
+    const executiveName = prompt("Executive name likho:");
+
+    if (!executiveName) return;
+
+    const { error } = await supabase
+      .from("cases")
+      .update({
+        remarks: `Assigned to ${executiveName}`,
+      })
+      .eq("id", Number(caseId));
+
+    if (error) {
+      alert("Assign error: " + error.message);
+      return;
+    }
+
+    setLocalCases((items) =>
+      items.map((item) =>
+        item.id === caseId ? { ...item, agent: executiveName } : item
+      )
+    );
+
+    alert(`Case ${caseId} assigned to ${executiveName}`);
+  }
+
+  async function markVisited(caseId: string) {
+    const { error } = await supabase
+      .from("cases")
+      .update({
+        status: "Visited",
+      })
+      .eq("id", Number(caseId));
+
+    if (error) {
+      alert("Visit error: " + error.message);
+      return;
+    }
+
+    setLocalCases((items) =>
+      items.map((item) =>
+        item.id === caseId ? { ...item, status: "Visited" } : item
+      )
+    );
+
+    alert(`Visit marked for case ${caseId}`);
+  }
+
+  async function markPayment(caseId: string) {
+    const { error } = await supabase
+      .from("cases")
+      .update({
+        status: "Paid",
+      })
+      .eq("id", Number(caseId));
+
+    if (error) {
+      alert("Payment error: " + error.message);
+      return;
+    }
+
+    setLocalCases((items) =>
+      items.map((item) =>
+        item.id === caseId ? { ...item, status: "Paid" } : item
+      )
+    );
+
+    alert(`Payment marked for case ${caseId}`);
+  }
+
+  async function markOverdue(caseId: string) {
+    const { error } = await supabase
+      .from("cases")
+      .update({
+        status: "Overdue",
+      })
+      .eq("id", Number(caseId));
+
+    if (error) {
+      alert("Status error: " + error.message);
+      return;
+    }
+
+    setLocalCases((items) =>
+      items.map((item) =>
+        item.id === caseId ? { ...item, status: "Overdue" } : item
+      )
+    );
+
+    alert(`Case ${caseId} marked overdue`);
   }
 
   return (
@@ -73,10 +167,10 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
                 </td>
                 <td>
                   <CaseActions
-                    onAssign={() => showMessage("Assign Executive", item.id)}
-                    onVisit={() => showMessage("Visit Proof", item.id)}
-                    onPayment={() => showMessage("Payment Entry", item.id)}
-                    onEdit={() => showMessage("Edit Case", item.id)}
+                    onAssign={() => assignExecutive(item.id)}
+                    onVisit={() => markVisited(item.id)}
+                    onPayment={() => markPayment(item.id)}
+                    onEdit={() => markOverdue(item.id)}
                     onDelete={() => onDeleteCase(item.id)}
                   />
                 </td>
