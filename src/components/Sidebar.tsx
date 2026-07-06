@@ -8,6 +8,7 @@ const menus = [
   "Bank Import",
   "Cases",
   "Executives",
+  "Executive App",
   "GPS Tracking",
   "Payments",
   "Reports",
