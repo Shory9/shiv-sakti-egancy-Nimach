@@ -3,7 +3,7 @@ import { supabase } from "../supabaseClient";
 import CaseActions from "./CaseActions";
 
 export type CaseItem = {
-  id: string;
+  id: number;
   customer: string;
   phone: string;
   bank: string;
@@ -20,7 +20,7 @@ type Executive = {
 
 type CasesTableProps = {
   cases: CaseItem[];
-  onDeleteCase: (id: string) => void;
+  onDeleteCase: (id: number) => void;
 };
 
 function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
@@ -28,8 +28,13 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
   const [localCases, setLocalCases] = useState<CaseItem[]>(cases);
   const [executives, setExecutives] = useState<Executive[]>([]);
 
-  useEffect(() => setLocalCases(cases), [cases]);
-  useEffect(() => { loadExecutives(); }, []);
+  useEffect(() => {
+    setLocalCases(cases);
+  }, [cases]);
+
+  useEffect(() => {
+    loadExecutives();
+  }, []);
 
   async function loadExecutives() {
     const { data, error } = await supabase
@@ -47,12 +52,14 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
   }
 
   const filteredCases = localCases.filter((item) =>
-    `${item.id} ${item.customer} ${item.phone} ${item.bank} ${item.assigned_agent || item.agent || ""} ${item.status}`
+    `${item.id} ${item.customer} ${item.phone} ${item.bank} ${
+      item.assigned_agent || item.agent || ""
+    } ${item.status}`
       .toLowerCase()
       .includes(search.toLowerCase())
   );
 
-  async function assignExecutive(caseId: string) {
+  async function assignExecutive(caseId: number) {
     if (executives.length === 0) {
       alert("Pehle Executive Management me executive add karo.");
       return;
@@ -95,7 +102,7 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
     alert(`Case ${caseId} assigned to ${matched.name}`);
   }
 
-  async function updateStatus(caseId: string, status: CaseItem["status"]) {
+  async function updateStatus(caseId: number, status: CaseItem["status"]) {
     const { error } = await supabase
       .from("cases")
       .update({ status })
