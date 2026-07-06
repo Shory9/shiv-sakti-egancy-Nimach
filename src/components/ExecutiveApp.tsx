@@ -1,14 +1,79 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { supabase } from "../supabaseClient";
+
+type Executive = {
+  id: number;
+  name: string;
+  mobile: string;
+  email: string;
+  area: string;
+  status?: string;
+};
 
 function ExecutiveApp() {
-  const [loggedIn, setLoggedIn] = useState(false);
   const [phone, setPhone] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [loggedIn, setLoggedIn] = useState(false);
+  const [executive, setExecutive] = useState<Executive | null>(null);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("executive_session");
+
+    if (saved) {
+      const data = JSON.parse(saved);
+      setExecutive(data);
+      setLoggedIn(true);
+    }
+  }, []);
+
+  async function loginExecutive() {
+    if (!phone.trim()) {
+      alert("Mobile Number Required");
+      return;
+    }
+
+    setLoading(true);
+
+    const { data, error } = await supabase
+      .from("agents")
+      .select("*")
+      .eq("mobile", phone)
+      .single();
+
+    setLoading(false);
+
+    if (error || !data) {
+      alert("Executive Not Found");
+      return;
+    }
+
+    localStorage.setItem(
+      "executive_session",
+      JSON.stringify(data)
+    );
+
+    setExecutive(data);
+    setLoggedIn(true);
+  }
+
+  function logout() {
+    localStorage.removeItem("executive_session");
+    setExecutive(null);
+    setLoggedIn(false);
+    setPhone("");
+  }
 
   if (!loggedIn) {
     return (
       <div className="module-card">
+
         <h2>📱 Executive Login</h2>
-        <p>Field executive apne mobile number se login karega.</p>
+
+        <p>
+          Login using your registered mobile number.
+        </p>
+
+        <br />
 
         <input
           placeholder="Mobile Number"
@@ -21,57 +86,120 @@ function ExecutiveApp() {
 
         <button
           className="primary-btn"
-          onClick={() => {
-            if (!phone) {
-              alert("Mobile number bharo.");
-              return;
-            }
-            setLoggedIn(true);
-          }}
+          onClick={loginExecutive}
         >
-          Login
+          {loading ? "Please Wait..." : "Login"}
         </button>
+
       </div>
     );
   }
 
   return (
     <div className="module-card">
-      <h2>🏠 Executive Home</h2>
-      <p>Welcome Field Executive</p>
+
+      <h2>👨‍💼 Executive Dashboard</h2>
+
+      <p>
+        Welcome <b>{executive?.name}</b>
+      </p>
+
+      <br />
 
       <div className="cards-grid">
+
         <div className="stat-card">
-          <div className="card-icon">📋</div>
-          <h3>Assigned Cases</h3>
-          <h2>0</h2>
-          <p>Aaj ke assigned cases</p>
+          <div className="card-icon">👤</div>
+
+          <h3>Name</h3>
+
+          <h2>{executive?.name}</h2>
+
+          <p>Field Executive</p>
         </div>
 
         <div className="stat-card">
-          <div className="card-icon">🚗</div>
-          <h3>Today Visits</h3>
-          <h2>0</h2>
-          <p>Aaj ke visits</p>
+          <div className="card-icon">📍</div>
+
+          <h3>Area</h3>
+
+          <h2>{executive?.area}</h2>
+
+          <p>Working Area</p>
+        </div>        <div className="stat-card">
+          <div className="card-icon">📞</div>
+
+          <h3>Mobile</h3>
+
+          <h2>{executive?.mobile}</h2>
+
+          <p>Registered Number</p>
         </div>
 
         <div className="stat-card">
           <div className="card-icon">🟢</div>
+
           <h3>Duty Status</h3>
-          <h2>Online</h2>
-          <p>Tracking ready</p>
+
+          <h2>Ready</h2>
+
+          <p>GPS Tracking Available</p>
         </div>
+
       </div>
 
       <br />
 
-      <button className="primary-btn">▶️ Start Duty</button>{" "}
-      <button className="delete-btn">⏹️ End Duty</button>
+      <div
+        style={{
+          display: "flex",
+          gap: "10px",
+          flexWrap: "wrap",
+        }}
+      >
+        <button className="primary-btn">
+          ▶️ Start Duty
+        </button>
+
+        <button className="delete-btn">
+          ⏹ End Duty
+        </button>
+
+        <button onClick={logout}>
+          Logout
+        </button>
+      </div>
 
       <br />
-      <br />
 
-      <button onClick={() => setLoggedIn(false)}>Logout</button>
+      <div className="module-card">
+        <h3>📋 Today's Summary</h3>
+
+        <table>
+          <tbody>
+            <tr>
+              <td>Assigned Cases</td>
+              <td>0</td>
+            </tr>
+
+            <tr>
+              <td>Visited Cases</td>
+              <td>0</td>
+            </tr>
+
+            <tr>
+              <td>Pending Cases</td>
+              <td>0</td>
+            </tr>
+
+            <tr>
+              <td>GPS Status</td>
+              <td>Ready</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
     </div>
   );
 }
