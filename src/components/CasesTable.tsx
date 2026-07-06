@@ -62,17 +62,25 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
       return;
     }
 
-    const executiveName = prompt(
-      "Executive name likho:\n\n" + executives.map((e) => e.name).join("\n")
-    );
+    const names = executives.map((e) => e.name).join(", ");
+    const executiveName = prompt(`Executive assign karo:\n${names}`);
 
     if (!executiveName) return;
+
+    const matchedExecutive = executives.find(
+      (e) => e.name.toLowerCase() === executiveName.trim().toLowerCase()
+    );
+
+    if (!matchedExecutive) {
+      alert("Executive list me ye naam nahi mila.");
+      return;
+    }
 
     const { error } = await supabase
       .from("cases")
       .update({
-        agent: executiveName,
-        remarks: `Assigned to ${executiveName}`,
+        agent: matchedExecutive.name,
+        remarks: `Assigned to ${matchedExecutive.name}`,
       })
       .eq("id", caseId);
 
@@ -83,19 +91,17 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
 
     setLocalCases((items) =>
       items.map((item) =>
-        item.id === caseId ? { ...item, agent: executiveName } : item
+        item.id === caseId ? { ...item, agent: matchedExecutive.name } : item
       )
     );
 
-    alert(`Case ${caseId} assigned to ${executiveName}`);
+    alert(`Case ${caseId} assigned to ${matchedExecutive.name}`);
   }
 
   async function markVisited(caseId: string) {
     const { error } = await supabase
       .from("cases")
-      .update({
-        status: "Visited",
-      })
+      .update({ status: "Visited" })
       .eq("id", caseId);
 
     if (error) {
@@ -108,16 +114,12 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
         item.id === caseId ? { ...item, status: "Visited" } : item
       )
     );
-
-    alert(`Visit marked for case ${caseId}`);
   }
 
   async function markPayment(caseId: string) {
     const { error } = await supabase
       .from("cases")
-      .update({
-        status: "Paid",
-      })
+      .update({ status: "Paid" })
       .eq("id", caseId);
 
     if (error) {
@@ -130,16 +132,12 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
         item.id === caseId ? { ...item, status: "Paid" } : item
       )
     );
-
-    alert(`Payment marked for case ${caseId}`);
   }
 
   async function markOverdue(caseId: string) {
     const { error } = await supabase
       .from("cases")
-      .update({
-        status: "Overdue",
-      })
+      .update({ status: "Overdue" })
       .eq("id", caseId);
 
     if (error) {
@@ -152,8 +150,6 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
         item.id === caseId ? { ...item, status: "Overdue" } : item
       )
     );
-
-    alert(`Case ${caseId} marked overdue`);
   }
 
   return (
@@ -192,7 +188,7 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
                 <td>{item.phone}</td>
                 <td>{item.bank}</td>
                 <td>₹{item.amount.toLocaleString("en-IN")}</td>
-                <td>{item.agent}</td>
+                <td>{item.agent || "Unassigned"}</td>
                 <td>
                   <span className={`status ${item.status.toLowerCase()}`}>
                     {item.status}
