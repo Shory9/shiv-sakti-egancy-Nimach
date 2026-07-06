@@ -1,4 +1,5 @@
 import { type ChangeEvent, useEffect, useState } from "react";
+import { supabase } from "../supabaseClient";
 
 type Visit = {
   id: number;
@@ -21,14 +22,23 @@ function GPSTracking() {
   const [photo, setPhoto] = useState("");
   const [visits, setVisits] = useState<Visit[]>([]);
 
-  useEffect(() => {
-    const saved = localStorage.getItem("gpsVisits");
-    if (saved) setVisits(JSON.parse(saved));
-  }, []);
+  async function loadVisits() {
+    const { data, error } = await supabase
+      .from("gps_visits")
+      .select("*")
+      .order("id", { ascending: false });
+
+    if (error) {
+      alert("GPS data load error: " + error.message);
+      return;
+    }
+
+    setVisits((data || []) as Visit[]);
+  }
 
   useEffect(() => {
-    localStorage.setItem("gpsVisits", JSON.stringify(visits));
-  }, [visits]);
+    loadVisits();
+  }, []);
 
   function handlePhoto(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -46,9 +56,8 @@ function GPSTracking() {
     }
 
     navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const newVisit: Visit = {
-          id: Date.now(),
+      async (position) => {
+        const newVisit = {
           executive,
           customer,
           area,
@@ -60,11 +69,18 @@ function GPSTracking() {
           time: new Date().toLocaleString("en-IN"),
         };
 
-        setVisits([newVisit, ...visits]);
+        const { error } = await supabase.from("gps_visits").insert(newVisit);
+
+        if (error) {
+          alert("GPS save error: " + error.message);
+          return;
+        }
+
         setCustomer("");
         setArea("");
         setRemarks("");
         setPhoto("");
+        loadVisits();
       },
       () => {
         alert("Location permission allow karo bro.");
@@ -72,14 +88,21 @@ function GPSTracking() {
     );
   }
 
-  function deleteVisit(id: number) {
+  async function deleteVisit(id: number) {
+    const { error } = await supabase.from("gps_visits").delete().eq("id", id);
+
+    if (error) {
+      alert("GPS delete error: " + error.message);
+      return;
+    }
+
     setVisits(visits.filter((item) => item.id !== id));
   }
 
   return (
     <div className="module-card">
       <h2>📍 GPS Tracking & Visit Proof</h2>
-      <p>Executive visit proof with GPS, photo, remarks and timestamp.</p>
+      <p>Real executive visit proof with GPS, photo, remarks and timestamp.</p>
 
       <hr />
 
@@ -202,7 +225,10 @@ function GPSTracking() {
               <td>{item.remarks}</td>
               <td>{item.time}</td>
               <td>
-                <button className="delete-btn" onClick={() => deleteVisit(item.id)}>
+                <button
+                  className="delete-btn"
+                  onClick={() => deleteVisit(item.id)}
+                >
                   Delete
                 </button>
               </td>
