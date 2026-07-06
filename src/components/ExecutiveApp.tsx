@@ -16,7 +16,7 @@ type MyCase = {
   phone: string;
   bank: string;
   amount: number;
-  agent: string;
+  assigned_agent?: string;
   status: "Pending" | "Visited" | "Paid" | "Overdue";
 };
 
@@ -31,6 +31,7 @@ function ExecutiveApp() {
 
   useEffect(() => {
     const saved = localStorage.getItem("executive_session");
+
     if (saved) {
       const data = JSON.parse(saved);
       setExecutive(data);
@@ -70,7 +71,7 @@ function ExecutiveApp() {
     const { data, error } = await supabase
       .from("cases")
       .select("*")
-      .eq("agent", name)
+      .eq("assigned_agent", name)
       .order("id", { ascending: false });
 
     if (error) {
@@ -86,9 +87,14 @@ function ExecutiveApp() {
     if (!file) return;
 
     const reader = new FileReader();
+
     reader.onload = () => {
-      setPhotos((old) => ({ ...old, [caseId]: String(reader.result) }));
+      setPhotos((old) => ({
+        ...old,
+        [caseId]: String(reader.result),
+      }));
     };
+
     reader.readAsDataURL(file);
   }
 
@@ -119,7 +125,9 @@ function ExecutiveApp() {
             .eq("id", item.id);
 
           setMyCases((old) =>
-            old.map((c) => (c.id === item.id ? { ...c, status: "Visited" } : c))
+            old.map((c) =>
+              c.id === item.id ? { ...c, status: "Visited" } : c
+            )
           );
         }
 
@@ -164,6 +172,7 @@ function ExecutiveApp() {
   return (
     <div className="module-card">
       <h2>👨‍💼 Executive Dashboard</h2>
+
       <p>
         Welcome <b>{executive?.name}</b> | Area: {executive?.area}
       </p>
@@ -216,18 +225,28 @@ function ExecutiveApp() {
             <button className="primary-btn">☎ Call</button>
           </a>{" "}
 
-          <button className="primary-btn" onClick={() => saveVisit(item, "Checked In")}>
+          <button
+            className="primary-btn"
+            onClick={() => saveVisit(item, "Checked In")}
+          >
             📍 Check In
           </button>{" "}
 
-          <button className="delete-btn" onClick={() => saveVisit(item, "Checked Out")}>
+          <button
+            className="delete-btn"
+            onClick={() => saveVisit(item, "Checked Out")}
+          >
             ⏹ Check Out
           </button>
 
           <br />
           <br />
 
-          <input type="file" accept="image/*" onChange={(e) => handlePhoto(item.id, e)} />
+          <input
+            type="file"
+            accept="image/*"
+            onChange={(e) => handlePhoto(item.id, e)}
+          />
 
           <br />
           <br />
@@ -236,7 +255,10 @@ function ExecutiveApp() {
             placeholder="Visit remarks"
             value={remarks[item.id] || ""}
             onChange={(e) =>
-              setRemarks((old) => ({ ...old, [item.id]: e.target.value }))
+              setRemarks((old) => ({
+                ...old,
+                [item.id]: e.target.value,
+              }))
             }
           />
 
