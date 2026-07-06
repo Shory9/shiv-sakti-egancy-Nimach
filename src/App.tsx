@@ -18,18 +18,12 @@ function App() {
 
       <main className="main">
         {activeMenu === "Dashboard" && <Dashboard />}
+        {activeMenu === "Cases" && <Dashboard />}
         {activeMenu === "Bank Import" && <BankImport />}
         {activeMenu === "Executives" && <ExecutiveManagement />}
         {activeMenu === "GPS Tracking" && <GPSTracking />}
         {activeMenu === "Payments" && <PaymentManagement />}
         {activeMenu === "Reports" && <Reports />}
-
-        {activeMenu === "Cases" && (
-          <div className="coming-soon">
-            <h1>Cases</h1>
-            <p>Cases module Dashboard ke andar abhi working hai.</p>
-          </div>
-        )}
       </main>
     </div>
   );
