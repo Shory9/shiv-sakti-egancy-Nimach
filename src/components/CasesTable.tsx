@@ -8,7 +8,8 @@ export type CaseItem = {
   phone: string;
   bank: string;
   amount: number;
-  agent: string;
+  assigned_agent?: string;
+  agent?: string;
   status: "Pending" | "Visited" | "Paid" | "Overdue";
 };
 
@@ -27,13 +28,8 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
   const [localCases, setLocalCases] = useState<CaseItem[]>(cases);
   const [executives, setExecutives] = useState<Executive[]>([]);
 
-  useEffect(() => {
-    setLocalCases(cases);
-  }, [cases]);
-
-  useEffect(() => {
-    loadExecutives();
-  }, []);
+  useEffect(() => setLocalCases(cases), [cases]);
+  useEffect(() => { loadExecutives(); }, []);
 
   async function loadExecutives() {
     const { data, error } = await supabase
@@ -51,7 +47,7 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
   }
 
   const filteredCases = localCases.filter((item) =>
-    `${item.id} ${item.customer} ${item.phone} ${item.bank} ${item.agent} ${item.status}`
+    `${item.id} ${item.customer} ${item.phone} ${item.bank} ${item.assigned_agent || item.agent || ""} ${item.status}`
       .toLowerCase()
       .includes(search.toLowerCase())
   );
@@ -62,16 +58,17 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
       return;
     }
 
-    const names = executives.map((e) => e.name).join(", ");
-    const executiveName = prompt(`Executive assign karo:\n${names}`);
+    const executiveName = prompt(
+      "Executive assign karo:\n" + executives.map((e) => e.name).join(", ")
+    );
 
     if (!executiveName) return;
 
-    const matchedExecutive = executives.find(
+    const matched = executives.find(
       (e) => e.name.toLowerCase() === executiveName.trim().toLowerCase()
     );
 
-    if (!matchedExecutive) {
+    if (!matched) {
       alert("Executive list me ye naam nahi mila.");
       return;
     }
@@ -79,8 +76,8 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
     const { error } = await supabase
       .from("cases")
       .update({
-        agent: matchedExecutive.name,
-        remarks: `Assigned to ${matchedExecutive.name}`,
+        assigned_agent: matched.name,
+        remarks: `Assigned to ${matched.name}`,
       })
       .eq("id", caseId);
 
@@ -91,53 +88,17 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
 
     setLocalCases((items) =>
       items.map((item) =>
-        item.id === caseId ? { ...item, agent: matchedExecutive.name } : item
+        item.id === caseId ? { ...item, assigned_agent: matched.name } : item
       )
     );
 
-    alert(`Case ${caseId} assigned to ${matchedExecutive.name}`);
+    alert(`Case ${caseId} assigned to ${matched.name}`);
   }
 
-  async function markVisited(caseId: string) {
+  async function updateStatus(caseId: string, status: CaseItem["status"]) {
     const { error } = await supabase
       .from("cases")
-      .update({ status: "Visited" })
-      .eq("id", caseId);
-
-    if (error) {
-      alert("Visit error: " + error.message);
-      return;
-    }
-
-    setLocalCases((items) =>
-      items.map((item) =>
-        item.id === caseId ? { ...item, status: "Visited" } : item
-      )
-    );
-  }
-
-  async function markPayment(caseId: string) {
-    const { error } = await supabase
-      .from("cases")
-      .update({ status: "Paid" })
-      .eq("id", caseId);
-
-    if (error) {
-      alert("Payment error: " + error.message);
-      return;
-    }
-
-    setLocalCases((items) =>
-      items.map((item) =>
-        item.id === caseId ? { ...item, status: "Paid" } : item
-      )
-    );
-  }
-
-  async function markOverdue(caseId: string) {
-    const { error } = await supabase
-      .from("cases")
-      .update({ status: "Overdue" })
+      .update({ status })
       .eq("id", caseId);
 
     if (error) {
@@ -146,9 +107,7 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
     }
 
     setLocalCases((items) =>
-      items.map((item) =>
-        item.id === caseId ? { ...item, status: "Overdue" } : item
-      )
+      items.map((item) => (item.id === caseId ? { ...item, status } : item))
     );
   }
 
@@ -188,7 +147,7 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
                 <td>{item.phone}</td>
                 <td>{item.bank}</td>
                 <td>₹{item.amount.toLocaleString("en-IN")}</td>
-                <td>{item.agent || "Unassigned"}</td>
+                <td>{item.assigned_agent || item.agent || "Unassigned"}</td>
                 <td>
                   <span className={`status ${item.status.toLowerCase()}`}>
                     {item.status}
@@ -197,9 +156,9 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
                 <td>
                   <CaseActions
                     onAssign={() => assignExecutive(item.id)}
-                    onVisit={() => markVisited(item.id)}
-                    onPayment={() => markPayment(item.id)}
-                    onEdit={() => markOverdue(item.id)}
+                    onVisit={() => updateStatus(item.id, "Visited")}
+                    onPayment={() => updateStatus(item.id, "Paid")}
+                    onEdit={() => updateStatus(item.id, "Overdue")}
                     onDelete={() => onDeleteCase(item.id)}
                   />
                 </td>
