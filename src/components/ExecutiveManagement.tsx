@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { supabase } from "../supabaseClient";
 
 type Executive = {
   id: number;
@@ -10,36 +11,6 @@ type Executive = {
   status: "Active" | "Inactive";
 };
 
-const defaultExecutives: Executive[] = [
-  {
-    id: 1,
-    name: "Amit",
-    phone: "9876543210",
-    area: "Neemuch City",
-    vehicle: "Bike",
-    cases: 42,
-    status: "Active",
-  },
-  {
-    id: 2,
-    name: "Rahul",
-    phone: "9123456780",
-    area: "Manasa",
-    vehicle: "Bike",
-    cases: 31,
-    status: "Active",
-  },
-  {
-    id: 3,
-    name: "Vikram",
-    phone: "9988776655",
-    area: "Jawad",
-    vehicle: "Scooter",
-    cases: 27,
-    status: "Inactive",
-  },
-];
-
 function ExecutiveManagement() {
   const [executives, setExecutives] = useState<Executive[]>([]);
   const [name, setName] = useState("");
@@ -47,50 +18,96 @@ function ExecutiveManagement() {
   const [area, setArea] = useState("");
   const [vehicle, setVehicle] = useState("");
 
-  useEffect(() => {
-    const saved = localStorage.getItem("executives");
+  async function loadExecutives() {
+    const { data, error } = await supabase
+      .from("agents")
+      .select("*")
+      .order("id", { ascending: false });
 
-    if (saved) {
-      setExecutives(JSON.parse(saved));
-    } else {
-      setExecutives(defaultExecutives);
+    if (error) {
+      alert("Executive load error: " + error.message);
+      return;
     }
+
+    setExecutives(
+      (data || []).map((item: any) => ({
+        id: item.id,
+        name: item.name || "",
+        phone: item.phone || "",
+        area: item.area || "",
+        vehicle: item.vehicle || "",
+        cases: item.cases || 0,
+        status: item.status === "Inactive" ? "Inactive" : "Active",
+      }))
+    );
+  }
+
+  useEffect(() => {
+    loadExecutives();
   }, []);
 
-  useEffect(() => {
-    localStorage.setItem("executives", JSON.stringify(executives));
-  }, [executives]);
+  async function addExecutive() {
+    if (!name || !phone || !area) {
+      alert("Name, phone aur area required hai.");
+      return;
+    }
 
-  function addExecutive() {
-    if (!name || !phone || !area) return;
-
-    const newExecutive: Executive = {
-      id: Date.now(),
+    const { error } = await supabase.from("agents").insert({
       name,
       phone,
       area,
       vehicle,
       cases: 0,
       status: "Active",
-    };
+    });
 
-    setExecutives([newExecutive, ...executives]);
+    if (error) {
+      alert("Executive add error: " + error.message);
+      return;
+    }
 
     setName("");
     setPhone("");
     setArea("");
     setVehicle("");
+    loadExecutives();
   }
 
-  function deleteExecutive(id: number) {
+  async function deleteExecutive(id: number) {
+    const { error } = await supabase.from("agents").delete().eq("id", id);
+
+    if (error) {
+      alert("Executive delete error: " + error.message);
+      return;
+    }
+
     setExecutives(executives.filter((e) => e.id !== id));
+  }
+
+  async function toggleStatus(item: Executive) {
+    const nextStatus = item.status === "Active" ? "Inactive" : "Active";
+
+    const { error } = await supabase
+      .from("agents")
+      .update({ status: nextStatus })
+      .eq("id", item.id);
+
+    if (error) {
+      alert("Status update error: " + error.message);
+      return;
+    }
+
+    setExecutives(
+      executives.map((e) =>
+        e.id === item.id ? { ...e, status: nextStatus } : e
+      )
+    );
   }
 
   return (
     <div className="module-card">
       <h2>👨‍💼 Executive Management</h2>
-
-      <p>Manage recovery field executives.</p>
+      <p>Recovery field executives ko manage karo.</p>
 
       <hr />
 
@@ -160,6 +177,9 @@ function ExecutiveManagement() {
               <td>{item.cases}</td>
               <td>{item.status}</td>
               <td>
+                <button onClick={() => toggleStatus(item)}>
+                  {item.status === "Active" ? "Deactivate" : "Activate"}
+                </button>{" "}
                 <button onClick={() => deleteExecutive(item.id)}>
                   Delete
                 </button>
