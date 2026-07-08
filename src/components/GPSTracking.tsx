@@ -9,6 +9,10 @@ type Executive = {
   vehicle: string;
   cases: number;
   status: "Active" | "Inactive";
+  last_latitude?: string | null;
+  last_longitude?: string | null;
+  last_seen?: string | null;
+  is_online?: boolean | null;
 };
 
 type Visit = {
@@ -55,16 +59,22 @@ function GPSTracking() {
 
   useEffect(() => {
     loadData();
+    const timer = window.setInterval(loadData, 30000);
+    return () => window.clearInterval(timer);
   }, []);
 
   const activeCount = executives.filter((e) => e.status === "Active").length;
-  const inactiveCount = executives.filter((e) => e.status === "Inactive").length;
+  const liveAgents = executives.filter((e) => e.last_latitude && e.last_longitude);
   const todayVisits = visits.length;
+
+  const mapAgent = liveAgents[0];
+  const mapLat = mapAgent?.last_latitude || visits[0]?.latitude;
+  const mapLng = mapAgent?.last_longitude || visits[0]?.longitude;
 
   return (
     <div className="module-card">
       <h2>📍 GPS Tracking Dashboard</h2>
-      <p>Admin ko field executives ki live tracking summary dikhane ke liye.</p>
+      <p>Admin ko field executives ki live location aur visit proof yahin milega.</p>
 
       <hr />
 
@@ -80,21 +90,21 @@ function GPSTracking() {
           <div className="card-icon">🟢</div>
           <h3>Active</h3>
           <h2>{activeCount}</h2>
-          <p>Currently active executives</p>
+          <p>Active executives</p>
         </div>
 
         <div className="stat-card">
-          <div className="card-icon">🔴</div>
-          <h3>Inactive</h3>
-          <h2>{inactiveCount}</h2>
-          <p>Inactive executives</p>
+          <div className="card-icon">📡</div>
+          <h3>Live GPS</h3>
+          <h2>{liveAgents.length}</h2>
+          <p>Agents with live location</p>
         </div>
 
         <div className="stat-card">
           <div className="card-icon">📌</div>
           <h3>GPS Records</h3>
           <h2>{todayVisits}</h2>
-          <p>Total saved GPS visits</p>
+          <p>Total saved visits</p>
         </div>
       </div>
 
@@ -102,35 +112,50 @@ function GPSTracking() {
 
       <div className="module-card">
         <h3>🗺️ Live Tracking Map</h3>
-        <p>Executive ki last GPS location map par open kar sakte ho.</p>
+        <p>
+          {mapAgent
+            ? `Showing live location: ${mapAgent.name}`
+            : "Latest saved GPS location map par dikh rahi hai."}
+        </p>
 
-        <div
-          style={{
-            height: "260px",
-            borderRadius: "18px",
-            background:
-              "linear-gradient(135deg, #dbeafe, #f0f9ff, #e0f2fe)",
-            border: "1px solid #bfdbfe",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            textAlign: "center",
-            padding: "20px",
-          }}
-        >
-          <div>
-            <h2>🗺️ GPS Map Preview</h2>
-            <p>
-              Neeche ke table me <b>Open Map</b> par click karke executive ki
-              exact location dekho.
-            </p>
+        {mapLat && mapLng ? (
+          <iframe
+            title="Live GPS Map"
+            src={`https://maps.google.com/maps?q=${mapLat},${mapLng}&z=16&output=embed`}
+            width="100%"
+            height="320"
+            style={{
+              border: 0,
+              borderRadius: "18px",
+              boxShadow: "0 12px 28px rgba(15, 23, 42, 0.12)",
+            }}
+            loading="lazy"
+          />
+        ) : (
+          <div
+            style={{
+              height: "260px",
+              borderRadius: "18px",
+              background: "linear-gradient(135deg, #dbeafe, #f0f9ff, #e0f2fe)",
+              border: "1px solid #bfdbfe",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              textAlign: "center",
+              padding: "20px",
+            }}
+          >
+            <div>
+              <h2>🗺️ No GPS Yet</h2>
+              <p>Executive app se live location ya Check In save karo.</p>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       <br />
 
-      <h3>👨‍💼 Executive Tracking List</h3>
+      <h3>👨‍💼 Executive Live Tracking List</h3>
 
       <table>
         <thead>
@@ -139,15 +164,15 @@ function GPSTracking() {
             <th>Phone</th>
             <th>Area</th>
             <th>Vehicle</th>
-            <th>Cases</th>
             <th>Status</th>
-            <th>Tracking</th>
+            <th>Last Seen</th>
+            <th>Live Map</th>
           </tr>
         </thead>
 
         <tbody>
           {executives.map((item) => {
-            const lastVisit = visits.find((v) => v.executive === item.name);
+            const hasLive = item.last_latitude && item.last_longitude;
 
             return (
               <tr key={item.id}>
@@ -155,12 +180,12 @@ function GPSTracking() {
                 <td>{item.phone}</td>
                 <td>{item.area}</td>
                 <td>{item.vehicle}</td>
-                <td>{item.cases}</td>
-                <td>{item.status === "Active" ? "🟢 Active" : "🔴 Inactive"}</td>
+                <td>{item.is_online ? "🟢 Online" : "🔴 Offline"}</td>
+                <td>{item.last_seen || "Not updated"}</td>
                 <td>
-                  {lastVisit ? (
+                  {hasLive ? (
                     <a
-                      href={`https://www.google.com/maps?q=${lastVisit.latitude},${lastVisit.longitude}`}
+                      href={`https://www.google.com/maps?q=${item.last_latitude},${item.last_longitude}`}
                       target="_blank"
                       rel="noreferrer"
                     >
