@@ -1,8 +1,15 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../supabaseClient";
 import AddCaseForm, { type NewCase } from "./AddCaseForm";
+import BankImport from "./BankImport";
 import CasesTable, { type CaseItem } from "./CasesTable";
+import ExecutiveApp from "./ExecutiveApp";
+import ExecutiveManagement from "./ExecutiveManagement";
+import GPSTracking from "./GPSTracking";
 import Header from "./Header";
+import PaymentManagement from "./PaymentManagement";
+import Reports from "./Reports";
+import Sidebar from "./Sidebar";
 import StatsCards from "./StatsCards";
 
 type SupabaseCase = {
@@ -11,11 +18,12 @@ type SupabaseCase = {
   mobile: string | null;
   bank_name: string | null;
   loan_amount: number | null;
-  assigned_agent: string | null;
+  assigned_agent: number | string | null;
   status: "Pending" | "Visited" | "Paid" | "Overdue" | string | null;
 };
 
 function Dashboard() {
+  const [activeMenu, setActiveMenu] = useState("Dashboard");
   const [cases, setCases] = useState<CaseItem[]>([]);
   const [showForm, setShowForm] = useState(false);
 
@@ -37,7 +45,7 @@ function Dashboard() {
       bank: item.bank_name || "",
       amount: Number(item.loan_amount || 0),
       assigned_agent: item.assigned_agent || "",
-      agent: item.assigned_agent || "Unassigned",
+      agent: "Unassigned",
       status:
         item.status === "Visited" ||
         item.status === "Paid" ||
@@ -69,30 +77,62 @@ function Dashboard() {
     setCases(cases.filter((item) => item.id !== id));
   }
 
-  return (
-    <section className="dashboard">
-      <Header
-        title="Shiv Shakti Recovery Dashboard"
-        subtitle="Bank recovery cases, agents, payments and field tracking overview."
-      />
+  function renderContent() {
+    if (activeMenu === "Bank Import") return <BankImport />;
+    if (activeMenu === "Executives") return <ExecutiveManagement />;
+    if (activeMenu === "Executive App") return <ExecutiveApp />;
+    if (activeMenu === "GPS Tracking") return <GPSTracking />;
+    if (activeMenu === "Payments") return <PaymentManagement />;
+    if (activeMenu === "Reports") return <Reports />;
 
-      <div className="dashboard-actions">
-        <button className="primary-btn" onClick={() => setShowForm(true)}>
-          + Add New Case
-        </button>
-      </div>
+    if (activeMenu === "Cases") {
+      return (
+        <section className="dashboard">
+          <Header
+            title="Recovery Cases"
+            subtitle="All bank recovery cases and executive assignment."
+          />
 
-      <StatsCards cases={cases} />
+          <div className="dashboard-actions">
+            <button className="primary-btn" onClick={() => setShowForm(true)}>
+              + Add New Case
+            </button>
+          </div>
 
-      {showForm && (
-        <AddCaseForm
-          onAddCase={handleAddCase}
-          onCancel={() => setShowForm(false)}
+          {showForm && (
+            <AddCaseForm
+              onAddCase={handleAddCase}
+              onCancel={() => setShowForm(false)}
+            />
+          )}
+
+          <CasesTable cases={cases} onDeleteCase={handleDeleteCase} />
+        </section>
+      );
+    }
+
+    return (
+      <section className="dashboard">
+        <Header
+          title="Shiv Shakti Recovery Dashboard"
+          subtitle="Bank recovery cases, agents, payments and field tracking overview."
         />
-      )}
 
-      <CasesTable cases={cases} onDeleteCase={handleDeleteCase} />
-    </section>
+        <StatsCards cases={cases} />
+
+        <br />
+
+        <CasesTable cases={cases} onDeleteCase={handleDeleteCase} />
+      </section>
+    );
+  }
+
+  return (
+    <div className="app">
+      <Sidebar activeMenu={activeMenu} setActiveMenu={setActiveMenu} />
+
+      <main className="main">{renderContent()}</main>
+    </div>
   );
 }
 
