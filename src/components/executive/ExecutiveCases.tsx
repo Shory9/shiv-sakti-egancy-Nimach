@@ -27,13 +27,16 @@ function ExecutiveCases({ executive, myCases, setMyCases, reloadVisits }: Props)
   function saveVisit(item: MyCase, status: "Checked In" | "Checked Out") {
     navigator.geolocation.getCurrentPosition(
       async (position) => {
+        const latitude = position.coords.latitude.toFixed(6);
+        const longitude = position.coords.longitude.toFixed(6);
+
         const { error } = await supabase.from("gps_visits").insert({
           executive: executive.name,
           customer: item.customer,
           area: executive.area,
           status,
-          latitude: position.coords.latitude.toFixed(6),
-          longitude: position.coords.longitude.toFixed(6),
+          latitude,
+          longitude,
           remarks: remarks[item.id] || "",
           photo: photos[item.id] || "",
           time: new Date().toLocaleString("en-IN"),
@@ -58,9 +61,22 @@ function ExecutiveCases({ executive, myCases, setMyCases, reloadVisits }: Props)
         }
 
         reloadVisits();
-        alert(status + " saved successfully.");
+
+        alert(
+          `${status} saved successfully.\nLocation:\n${latitude}, ${longitude}`
+        );
       },
-      () => alert("Location permission allow karo.")
+      (error) => {
+        alert(
+          "Location permission allow karo.\nGPS ON rakho.\nError: " +
+            error.message
+        );
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 0,
+      }
     );
   }
 
