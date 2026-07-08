@@ -27,6 +27,30 @@ function ExecutiveApp() {
   const [myCases, setMyCases] = useState<MyCase[]>([]);
   const [visits, setVisits] = useState<VisitRecord[]>([]);
 
+  async function updateLiveLocation(agent: Executive) {
+    if (!navigator.geolocation) return;
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        await supabase
+          .from("agents")
+          .update({
+            last_latitude: position.coords.latitude.toFixed(6),
+            last_longitude: position.coords.longitude.toFixed(6),
+            last_seen: new Date().toLocaleString("en-IN"),
+            is_online: true,
+          })
+          .eq("id", agent.id);
+      },
+      () => {},
+      {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 0,
+      }
+    );
+  }
+
   useEffect(() => {
     const saved = localStorage.getItem("executive_session");
     if (saved) {
@@ -34,8 +58,21 @@ function ExecutiveApp() {
       setExecutive(data);
       loadMyCases(Number(data.id));
       loadVisits(data.name);
+      updateLiveLocation(data);
     }
   }, []);
+
+  useEffect(() => {
+    if (!executive) return;
+
+    updateLiveLocation(executive);
+
+    const timer = window.setInterval(() => {
+      updateLiveLocation(executive);
+    }, 30000);
+
+    return () => window.clearInterval(timer);
+  }, [executive]);
 
   function convertCase(item: any): MyCase {
     return {
@@ -96,6 +133,7 @@ function ExecutiveApp() {
         vehicle: vehicle.trim(),
         status: "Active",
         cases: 0,
+        is_online: false,
       })
       .select()
       .single();
@@ -126,6 +164,7 @@ function ExecutiveApp() {
     setExecutive(updatedAgent);
     loadMyCases(Number(updatedAgent.id));
     loadVisits(updatedAgent.name);
+    updateLiveLocation(updatedAgent);
 
     alert(`Registration successful. Your Agent Code: ${agentCode}`);
   }
@@ -158,9 +197,17 @@ function ExecutiveApp() {
     setExecutive(data);
     loadMyCases(Number(data.id));
     loadVisits(data.name);
+    updateLiveLocation(data);
   }
 
-  function logout() {
+  async function logout() {
+    if (executive) {
+      await supabase
+        .from("agents")
+        .update({ is_online: false, last_seen: new Date().toLocaleString("en-IN") })
+        .eq("id", executive.id);
+    }
+
     localStorage.removeItem("executive_session");
     setExecutive(null);
     setScreen("dashboard");
@@ -184,33 +231,10 @@ function ExecutiveApp() {
 
           {mode === "register" && (
             <>
-              <input
-                className="exec-input"
-                placeholder="Full Name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-
-              <input
-                className="exec-input"
-                placeholder="Mobile Number"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-              />
-
-              <input
-                className="exec-input"
-                placeholder="Working Area"
-                value={area}
-                onChange={(e) => setArea(e.target.value)}
-              />
-
-              <input
-                className="exec-input"
-                placeholder="Vehicle Optional"
-                value={vehicle}
-                onChange={(e) => setVehicle(e.target.value)}
-              />
+              <input className="exec-input" placeholder="Full Name" value={name} onChange={(e) => setName(e.target.value)} />
+              <input className="exec-input" placeholder="Mobile Number" value={phone} onChange={(e) => setPhone(e.target.value)} />
+              <input className="exec-input" placeholder="Working Area" value={area} onChange={(e) => setArea(e.target.value)} />
+              <input className="exec-input" placeholder="Vehicle Optional" value={vehicle} onChange={(e) => setVehicle(e.target.value)} />
             </>
           )}
 
@@ -223,20 +247,12 @@ function ExecutiveApp() {
             />
           )}
 
-          <button
-            className="exec-primary-btn"
-            onClick={mode === "login" ? loginExecutive : registerExecutive}
-          >
+          <button className="exec-primary-btn" onClick={mode === "login" ? loginExecutive : registerExecutive}>
             {loading ? "Please wait..." : mode === "login" ? "Login" : "Register"}
           </button>
 
-          <button
-            className="exec-link-btn"
-            onClick={() => setMode(mode === "login" ? "register" : "login")}
-          >
-            {mode === "login"
-              ? "New Executive? Register Here"
-              : "Already Registered? Login"}
+          <button className="exec-link-btn" onClick={() => setMode(mode === "login" ? "register" : "login")}>
+            {mode === "login" ? "New Executive? Register Here" : "Already Registered? Login"}
           </button>
         </div>
       </div>
@@ -246,28 +262,16 @@ function ExecutiveApp() {
   return (
     <div className="exec-page with-nav">
       {screen === "dashboard" && (
-        <ExecutiveDashboard
-          executive={executive}
-          myCases={myCases}
-          visits={visits}
-          goTo={setScreen}
-        />
+        <ExecutiveDashboard executive={executive} myCases={myCases} visits={visits} goTo={setScreen} />
       )}
 
       {screen === "cases" && (
-        <ExecutiveCases
-          executive={executive}
-          myCases={myCases}
-          setMyCases={setMyCases}
-          reloadVisits={() => loadVisits(executive.name)}
-        />
+        <ExecutiveCases executive={executive} myCases={myCases} setMyCases={setMyCases} reloadVisits={() => loadVisits(executive.name)} />
       )}
 
       {screen === "gps" && <ExecutiveGPS executive={executive} visits={visits} />}
 
-      {screen === "profile" && (
-        <ExecutiveProfile executive={executive} logout={logout} />
-      )}
+      {screen === "profile" && <ExecutiveProfile executive={executive} logout={logout} />}
 
       <ExecutiveBottomNav active={screen} setScreen={setScreen} />
     </div>
