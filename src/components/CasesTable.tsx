@@ -8,7 +8,7 @@ export type CaseItem = {
   phone: string;
   bank: string;
   amount: number;
-  assigned_agent?: string;
+  assigned_agent?: number | string | null;
   agent?: string;
   status: "Pending" | "Visited" | "Paid" | "Overdue";
 };
@@ -16,6 +16,7 @@ export type CaseItem = {
 type Executive = {
   id: number;
   name: string;
+  agent_code?: string;
 };
 
 type CasesTableProps = {
@@ -39,9 +40,9 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
   async function loadExecutives() {
     const { data, error } = await supabase
       .from("agents")
-      .select("id, name")
+      .select("id, name, agent_code")
       .eq("status", "Active")
-      .order("name", { ascending: true });
+      .order("id", { ascending: true });
 
     if (error) {
       alert("Executive list error: " + error.message);
@@ -51,10 +52,19 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
     setExecutives(data || []);
   }
 
+  function getAgentName(item: CaseItem) {
+    const assignedId = Number(item.assigned_agent);
+    const matched = executives.find((e) => e.id === assignedId);
+
+    if (matched) {
+      return `${matched.agent_code || "SS" + String(matched.id).padStart(3, "0")} - ${matched.name}`;
+    }
+
+    return item.agent || "Unassigned";
+  }
+
   const filteredCases = localCases.filter((item) =>
-    `${item.id} ${item.customer} ${item.phone} ${item.bank} ${
-      item.assigned_agent || item.agent || ""
-    } ${item.status}`
+    `${item.id} ${item.customer} ${item.phone} ${item.bank} ${getAgentName(item)} ${item.status}`
       .toLowerCase()
       .includes(search.toLowerCase())
   );
@@ -65,26 +75,36 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
       return;
     }
 
-    const executiveName = prompt(
-      "Executive assign karo:\n" + executives.map((e) => e.name).join(", ")
+    const agentInput = prompt(
+      "Agent Code / ID enter karo:\n" +
+        executives
+          .map(
+            (e) =>
+              `${e.agent_code || "SS" + String(e.id).padStart(3, "0")} / ${e.id} = ${e.name}`
+          )
+          .join("\n")
     );
 
-    if (!executiveName) return;
+    if (!agentInput) return;
+
+    const value = agentInput.trim().toUpperCase();
 
     const matched = executives.find(
-      (e) => e.name.toLowerCase() === executiveName.trim().toLowerCase()
+      (e) =>
+        String(e.id) === value ||
+        (e.agent_code || "SS" + String(e.id).padStart(3, "0")).toUpperCase() === value
     );
 
     if (!matched) {
-      alert("Executive list me ye naam nahi mila.");
+      alert("Is Agent Code / ID ka executive nahi mila.");
       return;
     }
 
     const { error } = await supabase
       .from("cases")
       .update({
-        assigned_agent: matched.name,
-        remarks: `Assigned to ${matched.name}`,
+        assigned_agent: matched.id,
+        remarks: `Assigned to ${matched.agent_code || "SS" + String(matched.id).padStart(3, "0")} - ${matched.name}`,
       })
       .eq("id", caseId);
 
@@ -95,7 +115,9 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
 
     setLocalCases((items) =>
       items.map((item) =>
-        item.id === caseId ? { ...item, assigned_agent: matched.name } : item
+        item.id === caseId
+          ? { ...item, assigned_agent: matched.id, agent: matched.name }
+          : item
       )
     );
 
@@ -154,7 +176,7 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
                 <td>{item.phone}</td>
                 <td>{item.bank}</td>
                 <td>₹{item.amount.toLocaleString("en-IN")}</td>
-                <td>{item.assigned_agent || item.agent || "Unassigned"}</td>
+                <td>{getAgentName(item)}</td>
                 <td>
                   <span className={`status ${item.status.toLowerCase()}`}>
                     {item.status}

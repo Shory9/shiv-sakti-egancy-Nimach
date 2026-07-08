@@ -1,48 +1,87 @@
-import { type ChangeEvent, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "../supabaseClient";
+import "./executive/ExecutiveStyles.css";
 
-type Executive = {
-  id: number;
-  name: string;
-  phone: string;
-  area: string;
-  status?: string;
-  cases?: number;
-};
+import ExecutiveDashboard from "./executive/ExecutiveDashboard";
+import ExecutiveCases from "./executive/ExecutiveCases";
+import ExecutiveGPS from "./executive/ExecutiveGPS";
+import ExecutiveProfile from "./executive/ExecutiveProfile";
+import ExecutiveBottomNav from "./executive/ExecutiveBottomNav";
 
-type MyCase = {
-  id: string;
-  customer: string;
-  phone: string;
-  bank: string;
-  amount: number;
-  assigned_agent?: string;
-  status: "Pending" | "Visited" | "Paid" | "Overdue";
-};
+import type { Executive, MyCase, VisitRecord } from "./executive/executiveTypes";
+
+type Screen = "dashboard" | "cases" | "gps" | "profile";
 
 function ExecutiveApp() {
-  const [phone, setPhone] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [loggedIn, setLoggedIn] = useState(false);
+  const [screen, setScreen] = useState<Screen>("dashboard");
+  const [mode, setMode] = useState<"login" | "register">("login");
   const [executive, setExecutive] = useState<Executive | null>(null);
+
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [area, setArea] = useState("");
+  const [vehicle, setVehicle] = useState("");
+  const [loginText, setLoginText] = useState("");
+  const [loading, setLoading] = useState(false);
+
   const [myCases, setMyCases] = useState<MyCase[]>([]);
-  const [remarks, setRemarks] = useState<Record<string, string>>({});
-  const [photos, setPhotos] = useState<Record<string, string>>({});
+  const [visits, setVisits] = useState<VisitRecord[]>([]);
 
   useEffect(() => {
     const saved = localStorage.getItem("executive_session");
-
     if (saved) {
       const data = JSON.parse(saved);
       setExecutive(data);
-      setLoggedIn(true);
-      loadMyCases(data.name);
+      loadMyCases(Number(data.id));
+      loadVisits(data.name);
     }
   }, []);
 
-  async function loginExecutive() {
-    if (!phone.trim()) {
-      alert("Mobile Number Required");
+  function convertCase(item: any): MyCase {
+    return {
+      id: Number(item.id),
+      customer: item.customer || item.customer_name || "",
+      phone: item.phone || item.mobile || "",
+      bank: item.bank || item.bank_name || "",
+      amount: Number(item.amount || item.loan_amount || 0),
+      assigned_agent: item.assigned_agent || "",
+      status:
+        item.status === "Visited" ||
+        item.status === "Paid" ||
+        item.status === "Overdue"
+          ? item.status
+          : "Pending",
+    };
+  }
+
+  async function loadMyCases(agentId: number) {
+    const { data, error } = await supabase
+      .from("cases")
+      .select("*")
+      .eq("assigned_agent", agentId)
+      .order("id", { ascending: false });
+
+    if (error) {
+      alert("My Cases error: " + error.message);
+      return;
+    }
+
+    setMyCases((data || []).map(convertCase));
+  }
+
+  async function loadVisits(executiveName: string) {
+    const { data, error } = await supabase
+      .from("gps_visits")
+      .select("*")
+      .eq("executive", executiveName)
+      .order("id", { ascending: false });
+
+    if (!error) setVisits((data || []) as VisitRecord[]);
+  }
+
+  async function registerExecutive() {
+    if (!name.trim() || !phone.trim() || !area.trim()) {
+      alert("Name, phone aur area required hai.");
       return;
     }
 
@@ -50,236 +89,187 @@ function ExecutiveApp() {
 
     const { data, error } = await supabase
       .from("agents")
+      .insert({
+        name: name.trim(),
+        phone: phone.trim(),
+        area: area.trim(),
+        vehicle: vehicle.trim(),
+        status: "Active",
+        cases: 0,
+      })
+      .select()
+      .single();
+
+    if (error || !data) {
+      setLoading(false);
+      alert("Register error: " + (error?.message || "Unknown error"));
+      return;
+    }
+
+    const agentCode = "SS" + String(data.id).padStart(3, "0");
+
+    const { data: updatedAgent, error: codeError } = await supabase
+      .from("agents")
+      .update({ agent_code: agentCode })
+      .eq("id", data.id)
+      .select()
+      .single();
+
+    setLoading(false);
+
+    if (codeError || !updatedAgent) {
+      alert("Agent code error: " + (codeError?.message || "Unknown error"));
+      return;
+    }
+
+    localStorage.setItem("executive_session", JSON.stringify(updatedAgent));
+    setExecutive(updatedAgent);
+    loadMyCases(Number(updatedAgent.id));
+    loadVisits(updatedAgent.name);
+
+    alert(`Registration successful. Your Agent Code: ${agentCode}`);
+  }
+
+  async function loginExecutive() {
+    if (!loginText.trim()) {
+      alert("Agent Code / Phone / Name enter karo.");
+      return;
+    }
+
+    const value = loginText.trim();
+
+    setLoading(true);
+
+    const { data, error } = await supabase
+      .from("agents")
       .select("*")
-      .eq("phone", phone.trim())
+      .or(`agent_code.eq.${value},phone.eq.${value},name.ilike.${value}`)
+      .limit(1)
       .single();
 
     setLoading(false);
 
     if (error || !data) {
-      alert("Executive Not Found");
+      alert("Executive not found. Pehle register karo.");
       return;
     }
 
     localStorage.setItem("executive_session", JSON.stringify(data));
     setExecutive(data);
-    setLoggedIn(true);
-    loadMyCases(data.name);
-  }
-
-  async function loadMyCases(name: string) {
-    const { data, error } = await supabase
-      .from("cases")
-      .select("*")
-      .eq("assigned_agent", name)
-      .order("id", { ascending: false });
-
-    if (error) {
-      alert("My Cases load error: " + error.message);
-      return;
-    }
-
-    setMyCases((data || []) as MyCase[]);
-  }
-
-  function handlePhoto(caseId: string, e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-
-    reader.onload = () => {
-      setPhotos((old) => ({
-        ...old,
-        [caseId]: String(reader.result),
-      }));
-    };
-
-    reader.readAsDataURL(file);
-  }
-
-  function saveVisit(item: MyCase, status: "Checked In" | "Checked Out") {
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        const { error } = await supabase.from("gps_visits").insert({
-          executive: executive?.name || "",
-          customer: item.customer,
-          area: executive?.area || "",
-          status,
-          latitude: position.coords.latitude.toFixed(6),
-          longitude: position.coords.longitude.toFixed(6),
-          remarks: remarks[item.id] || "",
-          photo: photos[item.id] || "",
-          time: new Date().toLocaleString("en-IN"),
-        });
-
-        if (error) {
-          alert("GPS save error: " + error.message);
-          return;
-        }
-
-        if (status === "Checked Out") {
-          await supabase
-            .from("cases")
-            .update({ status: "Visited" })
-            .eq("id", item.id);
-
-          setMyCases((old) =>
-            old.map((c) =>
-              c.id === item.id ? { ...c, status: "Visited" } : c
-            )
-          );
-        }
-
-        alert(`${status} saved successfully`);
-      },
-      () => {
-        alert("Location permission allow karo.");
-      }
-    );
+    loadMyCases(Number(data.id));
+    loadVisits(data.name);
   }
 
   function logout() {
     localStorage.removeItem("executive_session");
     setExecutive(null);
-    setLoggedIn(false);
+    setScreen("dashboard");
+    setLoginText("");
     setPhone("");
+    setName("");
+    setArea("");
+    setVehicle("");
     setMyCases([]);
+    setVisits([]);
   }
 
-  if (!loggedIn) {
+  if (!executive) {
     return (
-      <div className="module-card">
-        <h2>📱 Executive Login</h2>
-        <p>Login using your registered mobile number.</p>
+      <div className="exec-page">
+        <div className="exec-login-card">
+          <div className="exec-logo">🚀</div>
 
-        <input
-          placeholder="Mobile Number"
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
-        />
+          <h1>Shiv Shakti Executive</h1>
+          <p>Recovery Field App</p>
 
-        <br />
-        <br />
+          {mode === "register" && (
+            <>
+              <input
+                className="exec-input"
+                placeholder="Full Name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
 
-        <button className="primary-btn" onClick={loginExecutive}>
-          {loading ? "Please Wait..." : "Login"}
-        </button>
+              <input
+                className="exec-input"
+                placeholder="Mobile Number"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+              />
+
+              <input
+                className="exec-input"
+                placeholder="Working Area"
+                value={area}
+                onChange={(e) => setArea(e.target.value)}
+              />
+
+              <input
+                className="exec-input"
+                placeholder="Vehicle Optional"
+                value={vehicle}
+                onChange={(e) => setVehicle(e.target.value)}
+              />
+            </>
+          )}
+
+          {mode === "login" && (
+            <input
+              className="exec-input"
+              placeholder="Agent Code / Phone / Name"
+              value={loginText}
+              onChange={(e) => setLoginText(e.target.value)}
+            />
+          )}
+
+          <button
+            className="exec-primary-btn"
+            onClick={mode === "login" ? loginExecutive : registerExecutive}
+          >
+            {loading ? "Please wait..." : mode === "login" ? "Login" : "Register"}
+          </button>
+
+          <button
+            className="exec-link-btn"
+            onClick={() => setMode(mode === "login" ? "register" : "login")}
+          >
+            {mode === "login"
+              ? "New Executive? Register Here"
+              : "Already Registered? Login"}
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="module-card">
-      <h2>👨‍💼 Executive Dashboard</h2>
+    <div className="exec-page with-nav">
+      {screen === "dashboard" && (
+        <ExecutiveDashboard
+          executive={executive}
+          myCases={myCases}
+          visits={visits}
+          goTo={setScreen}
+        />
+      )}
 
-      <p>
-        Welcome <b>{executive?.name}</b> | Area: {executive?.area}
-      </p>
+      {screen === "cases" && (
+        <ExecutiveCases
+          executive={executive}
+          myCases={myCases}
+          setMyCases={setMyCases}
+          reloadVisits={() => loadVisits(executive.name)}
+        />
+      )}
 
-      <div className="cards-grid">
-        <div className="stat-card">
-          <div className="card-icon">📋</div>
-          <h3>My Cases</h3>
-          <h2>{myCases.length}</h2>
-          <p>Assigned cases</p>
-        </div>
+      {screen === "gps" && <ExecutiveGPS executive={executive} visits={visits} />}
 
-        <div className="stat-card">
-          <div className="card-icon">🟢</div>
-          <h3>Status</h3>
-          <h2>{executive?.status || "Active"}</h2>
-          <p>Duty ready</p>
-        </div>
+      {screen === "profile" && (
+        <ExecutiveProfile executive={executive} logout={logout} />
+      )}
 
-        <div className="stat-card">
-          <div className="card-icon">📞</div>
-          <h3>Phone</h3>
-          <h2>{executive?.phone}</h2>
-          <p>Registered number</p>
-        </div>
-      </div>
-
-      <br />
-
-      <button className="delete-btn" onClick={logout}>
-        Logout
-      </button>
-
-      <br />
-      <br />
-
-      <h3>📋 My Assigned Cases</h3>
-
-      {myCases.length === 0 && <p>No assigned cases found.</p>}
-
-      {myCases.map((item) => (
-        <div className="module-card" key={item.id}>
-          <h3>{item.customer}</h3>
-          <p>📞 {item.phone}</p>
-          <p>🏦 {item.bank}</p>
-          <p>💰 ₹{item.amount?.toLocaleString("en-IN")}</p>
-          <p>📌 Status: {item.status}</p>
-
-          <a href={`tel:${item.phone}`}>
-            <button className="primary-btn">☎ Call</button>
-          </a>{" "}
-
-          <button
-            className="primary-btn"
-            onClick={() => saveVisit(item, "Checked In")}
-          >
-            📍 Check In
-          </button>{" "}
-
-          <button
-            className="delete-btn"
-            onClick={() => saveVisit(item, "Checked Out")}
-          >
-            ⏹ Check Out
-          </button>
-
-          <br />
-          <br />
-
-          <input
-            type="file"
-            accept="image/*"
-            onChange={(e) => handlePhoto(item.id, e)}
-          />
-
-          <br />
-          <br />
-
-          <input
-            placeholder="Visit remarks"
-            value={remarks[item.id] || ""}
-            onChange={(e) =>
-              setRemarks((old) => ({
-                ...old,
-                [item.id]: e.target.value,
-              }))
-            }
-          />
-
-          {photos[item.id] && (
-            <>
-              <br />
-              <br />
-              <img
-                src={photos[item.id]}
-                alt="Proof"
-                style={{
-                  width: "100px",
-                  height: "80px",
-                  objectFit: "cover",
-                  borderRadius: "8px",
-                }}
-              />
-            </>
-          )}
-        </div>
-      ))}
+      <ExecutiveBottomNav active={screen} setScreen={setScreen} />
     </div>
   );
 }

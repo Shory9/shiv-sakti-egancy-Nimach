@@ -31,11 +31,12 @@ function Dashboard() {
     }
 
     const convertedCases: CaseItem[] = (data as SupabaseCase[]).map((item) => ({
-      id: String(item.id),
+      id: item.id,
       customer: item.customer_name,
       phone: item.mobile || "",
       bank: item.bank_name || "",
       amount: Number(item.loan_amount || 0),
+      assigned_agent: item.assigned_agent || "",
       agent: item.assigned_agent || "Unassigned",
       status:
         item.status === "Visited" ||
@@ -57,8 +58,8 @@ function Dashboard() {
     setShowForm(false);
   }
 
-  async function handleDeleteCase(id: string) {
-    const { error } = await supabase.from("cases").delete().eq("id", Number(id));
+  async function handleDeleteCase(id: number) {
+    const { error } = await supabase.from("cases").delete().eq("id", id);
 
     if (error) {
       alert("Delete error: " + error.message);

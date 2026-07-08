@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Shiv Shakti Executive</string>
+    <string name="title_activity_main">Shiv Shakti Executive</string>
+    <string name="package_name">com.shivshakti.executive</string>
+    <string name="custom_url_scheme">com.shivshakti.executive</string>
+</resources>
