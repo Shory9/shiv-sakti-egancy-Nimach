@@ -130,7 +130,6 @@ function Dashboard() {
   return (
     <div className="app">
       <Sidebar activeMenu={activeMenu} setActiveMenu={setActiveMenu} />
-
       <main className="main">{renderContent()}</main>
     </div>
   );
