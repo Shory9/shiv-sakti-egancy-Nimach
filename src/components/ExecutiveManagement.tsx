@@ -3,12 +3,15 @@ import { supabase } from "../supabaseClient";
 
 type Executive = {
   id: number;
+  agent_code?: string | null;
   name: string;
   phone: string;
   area: string;
   vehicle: string;
   cases: number;
   status: "Active" | "Inactive";
+  is_online?: boolean | null;
+  last_seen?: string | null;
 };
 
 function ExecutiveManagement() {
@@ -17,6 +20,10 @@ function ExecutiveManagement() {
   const [phone, setPhone] = useState("");
   const [area, setArea] = useState("");
   const [vehicle, setVehicle] = useState("");
+
+  function formatAgentCode(id: number, code?: string | null) {
+    return code || "SS" + String(id).padStart(3, "0");
+  }
 
   async function loadExecutives() {
     const { data, error } = await supabase
@@ -32,12 +39,15 @@ function ExecutiveManagement() {
     setExecutives(
       (data || []).map((item: any) => ({
         id: item.id,
+        agent_code: item.agent_code || null,
         name: item.name || "",
         phone: item.phone || "",
         area: item.area || "",
         vehicle: item.vehicle || "",
         cases: item.cases || 0,
         status: item.status === "Inactive" ? "Inactive" : "Active",
+        is_online: item.is_online || false,
+        last_seen: item.last_seen || "",
       }))
     );
   }
@@ -47,33 +57,53 @@ function ExecutiveManagement() {
   }, []);
 
   async function addExecutive() {
-    if (!name || !phone || !area) {
+    if (!name.trim() || !phone.trim() || !area.trim()) {
       alert("Name, phone aur area required hai.");
       return;
     }
 
-    const { error } = await supabase.from("agents").insert({
-      name,
-      phone,
-      area,
-      vehicle,
-      cases: 0,
-      status: "Active",
-    });
+    const { data, error } = await supabase
+      .from("agents")
+      .insert({
+        name: name.trim(),
+        phone: phone.trim(),
+        area: area.trim(),
+        vehicle: vehicle.trim(),
+        cases: 0,
+        status: "Active",
+        is_online: false,
+      })
+      .select()
+      .single();
 
-    if (error) {
-      alert("Executive add error: " + error.message);
+    if (error || !data) {
+      alert("Executive add error: " + (error?.message || "Unknown error"));
       return;
     }
+
+    const agentCode = "SS" + String(data.id).padStart(3, "0");
+
+    await supabase
+      .from("agents")
+      .update({ agent_code: agentCode })
+      .eq("id", data.id);
 
     setName("");
     setPhone("");
     setArea("");
     setVehicle("");
     loadExecutives();
+
+    alert(`Executive added successfully.\nAgent Code: ${agentCode}`);
   }
 
   async function deleteExecutive(id: number) {
+    const ok = window.confirm(
+      "Is executive ko delete karna hai? Agar cases assigned hain to pehle unhe reassign kar lo."
+    );
+
+    if (!ok) return;
+
     const { error } = await supabase.from("agents").delete().eq("id", id);
 
     if (error) {
@@ -106,13 +136,18 @@ function ExecutiveManagement() {
 
   return (
     <div className="module-card">
-      <h2>👨‍💼 Executive Management</h2>
-      <p>Recovery field executives ko manage karo.</p>
+      <h2>👨‍💼 Field Executive Management</h2>
+      <p>
+        Recovery agency ke real field executives, agent code, mobile number,
+        working area aur live status manage karo.
+      </p>
 
       <hr />
 
+      <h3>Add Field Executive</h3>
+
       <input
-        placeholder="Executive Name"
+        placeholder="Executive Full Name"
         value={name}
         onChange={(e) => setName(e.target.value)}
       />
@@ -130,7 +165,7 @@ function ExecutiveManagement() {
       <br />
 
       <input
-        placeholder="Working Area"
+        placeholder="Working Area / Route"
         value={area}
         onChange={(e) => setArea(e.target.value)}
       />
@@ -139,7 +174,7 @@ function ExecutiveManagement() {
       <br />
 
       <input
-        placeholder="Vehicle"
+        placeholder="Vehicle Number / Vehicle Type"
         value={vehicle}
         onChange={(e) => setVehicle(e.target.value)}
       />
@@ -148,21 +183,26 @@ function ExecutiveManagement() {
       <br />
 
       <button className="primary-btn" onClick={addExecutive}>
-        + Add Executive
+        + Add Field Executive
       </button>
 
       <br />
       <br />
 
+      <h3>Executive List</h3>
+
       <table>
         <thead>
           <tr>
+            <th>Agent Code</th>
             <th>Name</th>
             <th>Phone</th>
             <th>Area</th>
             <th>Vehicle</th>
-            <th>Cases</th>
-            <th>Status</th>
+            <th>Assigned Cases</th>
+            <th>Live Status</th>
+            <th>Last Seen</th>
+            <th>Account Status</th>
             <th>Action</th>
           </tr>
         </thead>
@@ -170,11 +210,16 @@ function ExecutiveManagement() {
         <tbody>
           {executives.map((item) => (
             <tr key={item.id}>
+              <td>
+                <strong>{formatAgentCode(item.id, item.agent_code)}</strong>
+              </td>
               <td>{item.name}</td>
               <td>{item.phone}</td>
               <td>{item.area}</td>
               <td>{item.vehicle}</td>
               <td>{item.cases}</td>
+              <td>{item.is_online ? "🟢 Online" : "🔴 Offline"}</td>
+              <td>{item.last_seen || "Not updated"}</td>
               <td>{item.status}</td>
               <td>
                 <button onClick={() => toggleStatus(item)}>
