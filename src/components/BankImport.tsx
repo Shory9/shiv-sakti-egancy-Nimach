@@ -2,13 +2,7 @@ import { type ChangeEvent, useState } from "react";
 import * as XLSX from "xlsx";
 import { supabase } from "../supabaseClient";
 
-type ImportStatus =
-  | "idle"
-  | "selected"
-  | "processing"
-  | "ready"
-  | "importing"
-  | "imported";
+type ImportStatus = "idle" | "ready" | "importing" | "imported";
 
 type ImportedCase = {
   customer: string;
@@ -46,52 +40,61 @@ function BankImport() {
     if (!file) return;
 
     setFileName(file.name);
-    setStatus("selected");
+    setStatus("idle");
     setCases([]);
 
     const reader = new FileReader();
 
     reader.onload = (event) => {
-      const data = event.target?.result;
-      const workbook = XLSX.read(data, { type: "array" });
-      const sheetName = workbook.SheetNames[0];
-      const sheet = workbook.Sheets[sheetName];
+      try {
+        const data = event.target?.result;
+        const workbook = XLSX.read(data, { type: "array" });
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
 
-      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet);
+        const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet);
 
-      const parsedCases: ImportedCase[] = rows
-        .map((row) => {
-          const customer =
-            findValue(row, ["customer", "name", "borrower", "party"]) || "";
+        const parsedCases: ImportedCase[] = rows
+          .map((row) => {
+            const customer =
+              findValue(row, ["customer", "name", "borrower", "party"]) || "";
 
-          const phone =
-            findValue(row, ["mobile", "phone", "contact"]) || "";
+            const phone = findValue(row, ["mobile", "phone", "contact"]) || "";
 
-          const amountText =
-            findValue(row, ["loanamount", "amount", "outstanding", "balance"]) ||
-            "0";
+            const amountText =
+              findValue(row, ["loanamount", "amount", "outstanding", "balance"]) ||
+              "0";
 
-          const pendingText =
-            findValue(row, ["pending", "due", "overdue", "outstanding"]) ||
-            amountText;
+            const pendingText =
+              findValue(row, ["pending", "due", "overdue", "outstanding"]) ||
+              amountText;
 
-          return {
-            customer,
-            phone,
-            bank: bankName,
-            loanType: findValue(row, ["loantype", "product", "type"]) || "Recovery",
-            amount: Number(String(amountText).replace(/[^0-9.]/g, "")) || 0,
-            pendingAmount:
-              Number(String(pendingText).replace(/[^0-9.]/g, "")) || 0,
-            area:
-              findValue(row, ["area", "city", "location", "address"]) || "",
-            remarks: `Imported from ${bankName} Excel: ${file.name}`,
-          };
-        })
-        .filter((item) => item.customer || item.phone || item.amount > 0);
+            return {
+              customer,
+              phone,
+              bank: bankName,
+              loanType:
+                findValue(row, ["loantype", "product", "type"]) || "Recovery",
+              amount: Number(String(amountText).replace(/[^0-9.]/g, "")) || 0,
+              pendingAmount:
+                Number(String(pendingText).replace(/[^0-9.]/g, "")) || 0,
+              area:
+                findValue(row, ["area", "city", "location", "address"]) || "",
+              remarks: `Imported from ${bankName} Excel: ${file.name}`,
+            };
+          })
+          .filter((item) => item.customer || item.phone || item.amount > 0);
 
-      setCases(parsedCases);
-      setStatus("ready");
+        setCases(parsedCases);
+        setStatus("ready");
+
+        if (parsedCases.length === 0) {
+          alert("Excel file read hui, lekin valid cases nahi mile.");
+        }
+      } catch (error) {
+        alert("Excel read error. File format check karo.");
+        setStatus("idle");
+      }
     };
 
     reader.readAsArrayBuffer(file);
@@ -126,12 +129,16 @@ function BankImport() {
     }
 
     setStatus("imported");
+    alert(`${cases.length} cases imported successfully.`);
   }
 
   return (
     <div className="module-card">
       <h1>📄 Bank Excel Import</h1>
-      <p>SBI ya Bank of Baroda ki Excel file upload karo, preview dekho, phir CRM database me import karo.</p>
+      <p>
+        SBI ya Bank of Baroda ki Excel file upload karo, preview dekho, phir CRM
+        database me import karo.
+      </p>
 
       <hr />
 
@@ -147,17 +154,23 @@ function BankImport() {
       <h3>Select Bank Excel File</h3>
       <input type="file" accept=".xlsx,.xls" onChange={handleFile} />
 
-      {status !== "idle" && (
+      {fileName && (
         <div className="card">
           <h3>Selected File</h3>
           <p><strong>Bank:</strong> {bankName}</p>
           <p><strong>File:</strong> {fileName}</p>
           <p><strong>Status:</strong> {status}</p>
           <p><strong>Rows Found:</strong> {cases.length}</p>
+
+          {cases.length > 0 && (
+            <button className="primary-btn" onClick={importCases}>
+              Import {cases.length} Cases to CRM Database
+            </button>
+          )}
         </div>
       )}
 
-      {status === "ready" && (
+      {cases.length > 0 && (
         <div className="card">
           <h3>Generated Cases Preview</h3>
 
@@ -175,7 +188,7 @@ function BankImport() {
             </thead>
 
             <tbody>
-              {cases.map((item, index) => (
+              {cases.slice(0, 20).map((item, index) => (
                 <tr key={index}>
                   <td>{item.customer}</td>
                   <td>{item.phone}</td>
@@ -189,11 +202,7 @@ function BankImport() {
             </tbody>
           </table>
 
-          <br />
-
-          <button className="primary-btn" onClick={importCases}>
-            Import Cases to CRM Database
-          </button>
+          <p>Showing first 20 rows. Total rows: {cases.length}</p>
         </div>
       )}
 
