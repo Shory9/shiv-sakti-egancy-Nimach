@@ -89,13 +89,13 @@ function Dashboard() {
       return (
         <section className="dashboard">
           <Header
-            title="Recovery Cases"
-            subtitle="All bank recovery cases and executive assignment."
+            title="Recovery Case Management"
+            subtitle="Manage bank recovery cases, assignments and field visit status."
           />
 
           <div className="dashboard-actions">
             <button className="primary-btn" onClick={() => setShowForm(true)}>
-              + Add New Case
+              + Add Recovery Case
             </button>
           </div>
 
@@ -114,8 +114,8 @@ function Dashboard() {
     return (
       <section className="dashboard">
         <Header
-          title="Shiv Shakti Recovery Dashboard"
-          subtitle="Bank recovery cases, agents, payments and field tracking overview."
+          title="Shiv Shakti Recovery CRM"
+          subtitle="Professional recovery management system for cases, executives, GPS tracking and payments."
         />
 
         <StatsCards cases={cases} />
