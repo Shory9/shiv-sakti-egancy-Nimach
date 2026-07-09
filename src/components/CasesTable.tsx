@@ -28,6 +28,7 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
   const [search, setSearch] = useState("");
   const [localCases, setLocalCases] = useState<CaseItem[]>(cases);
   const [executives, setExecutives] = useState<Executive[]>([]);
+  const [selectedAgents, setSelectedAgents] = useState<Record<number, string>>({});
 
   useEffect(() => {
     setLocalCases(cases);
@@ -52,15 +53,14 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
     setExecutives(data || []);
   }
 
+  function formatAgent(agent: Executive) {
+    return `${agent.agent_code || "SS" + String(agent.id).padStart(3, "0")} - ${agent.name}`;
+  }
+
   function getAgentName(item: CaseItem) {
     const assignedId = Number(item.assigned_agent);
     const matched = executives.find((e) => e.id === assignedId);
-
-    if (matched) {
-      return `${matched.agent_code || "SS" + String(matched.id).padStart(3, "0")} - ${matched.name}`;
-    }
-
-    return item.agent || "Unassigned";
+    return matched ? formatAgent(matched) : item.agent || "Unassigned";
   }
 
   const filteredCases = localCases.filter((item) =>
@@ -70,33 +70,18 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
   );
 
   async function assignExecutive(caseId: number) {
-    if (executives.length === 0) {
-      alert("Pehle Executive Management me executive add karo.");
+    const selectedId = selectedAgents[caseId];
+
+    if (!selectedId) {
+      alert("Pehle dropdown se field executive select karo.");
       return;
     }
 
-    const agentInput = prompt(
-      "Agent Code / ID enter karo:\n" +
-        executives
-          .map(
-            (e) =>
-              `${e.agent_code || "SS" + String(e.id).padStart(3, "0")} / ${e.id} = ${e.name}`
-          )
-          .join("\n")
-    );
-
-    if (!agentInput) return;
-
-    const value = agentInput.trim().toUpperCase();
-
-    const matched = executives.find(
-      (e) =>
-        String(e.id) === value ||
-        (e.agent_code || "SS" + String(e.id).padStart(3, "0")).toUpperCase() === value
-    );
+    const agentId = Number(selectedId);
+    const matched = executives.find((e) => e.id === agentId);
 
     if (!matched) {
-      alert("Is Agent Code / ID ka executive nahi mila.");
+      alert("Selected executive nahi mila.");
       return;
     }
 
@@ -104,7 +89,7 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
       .from("cases")
       .update({
         assigned_agent: matched.id,
-        remarks: `Assigned to ${matched.agent_code || "SS" + String(matched.id).padStart(3, "0")} - ${matched.name}`,
+        remarks: `Assigned to ${formatAgent(matched)}`,
       })
       .eq("id", caseId);
 
@@ -116,12 +101,12 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
     setLocalCases((items) =>
       items.map((item) =>
         item.id === caseId
-          ? { ...item, assigned_agent: matched.id, agent: matched.name }
+          ? { ...item, assigned_agent: matched.id, agent: formatAgent(matched) }
           : item
       )
     );
 
-    alert(`Case ${caseId} assigned to ${matched.name}`);
+    alert(`Case ${caseId} assigned to ${formatAgent(matched)}`);
   }
 
   async function updateStatus(caseId: number, status: CaseItem["status"]) {
@@ -145,7 +130,7 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
       <h2>Recovery Cases</h2>
 
       <input
-        placeholder="Search case, customer, phone, bank, agent..."
+        placeholder="Search case, customer, phone, bank, executive..."
         value={search}
         onChange={(e) => setSearch(e.target.value)}
       />
@@ -162,7 +147,8 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
               <th>Phone</th>
               <th>Bank</th>
               <th>Amount</th>
-              <th>Agent</th>
+              <th>Assigned Executive</th>
+              <th>Assign / Reassign</th>
               <th>Status</th>
               <th>Action</th>
             </tr>
@@ -177,6 +163,24 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
                 <td>{item.bank}</td>
                 <td>₹{item.amount.toLocaleString("en-IN")}</td>
                 <td>{getAgentName(item)}</td>
+                <td>
+                  <select
+                    value={selectedAgents[item.id] || ""}
+                    onChange={(e) =>
+                      setSelectedAgents((old) => ({
+                        ...old,
+                        [item.id]: e.target.value,
+                      }))
+                    }
+                  >
+                    <option value="">Select Executive</option>
+                    {executives.map((agent) => (
+                      <option key={agent.id} value={agent.id}>
+                        {formatAgent(agent)}
+                      </option>
+                    ))}
+                  </select>
+                </td>
                 <td>
                   <span className={`status ${item.status.toLowerCase()}`}>
                     {item.status}
