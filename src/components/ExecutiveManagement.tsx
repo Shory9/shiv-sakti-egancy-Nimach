@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { type ChangeEvent, useEffect, useState } from "react";
+import * as XLSX from "xlsx";
 import { supabase } from "../supabaseClient";
 
 type Executive = {
@@ -14,6 +15,17 @@ type Executive = {
   last_seen?: string | null;
 };
 
+type ImportedCase = {
+  customer: string;
+  phone: string;
+  bank: string;
+  loanType: string;
+  amount: number;
+  pendingAmount: number;
+  area: string;
+  remarks: string;
+};
+
 function ExecutiveManagement() {
   const [executives, setExecutives] = useState<Executive[]>([]);
   const [name, setName] = useState("");
@@ -23,6 +35,20 @@ function ExecutiveManagement() {
 
   function formatAgentCode(id: number, code?: string | null) {
     return code || "SS" + String(id).padStart(3, "0");
+  }
+
+  function findValue(row: Record<string, unknown>, keys: string[]) {
+    const rowKeys = Object.keys(row);
+
+    for (const key of keys) {
+      const foundKey = rowKeys.find((item) =>
+        item.toLowerCase().replace(/\s/g, "").includes(key.toLowerCase())
+      );
+
+      if (foundKey) return String(row[foundKey] || "");
+    }
+
+    return "";
   }
 
   async function loadExecutives() {
@@ -134,6 +160,135 @@ function ExecutiveManagement() {
     );
   }
 
+  async function uploadCasesForExecutive(
+    executive: Executive,
+    e: ChangeEvent<HTMLInputElement>
+  ) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+
+    if (!file) return;
+
+    const ok = window.confirm(
+      `${formatAgentCode(executive.id, executive.agent_code)} - ${executive.name} ke liye cases upload kar rahe ho.\n\nFile: ${file.name}\n\nContinue?`
+    );
+
+    if (!ok) return;
+
+    const reader = new FileReader();
+
+    reader.onload = async (event) => {
+      try {
+        const data = event.target?.result;
+        const workbook = XLSX.read(data, { type: "array" });
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+
+        const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet);
+
+        const parsedCases: ImportedCase[] = rows
+          .map((row) => {
+            const customer =
+              findValue(row, ["customer", "name", "borrower", "party"]) || "";
+
+            const mobile = findValue(row, ["mobile", "phone", "contact"]) || "";
+
+            const bank =
+              findValue(row, ["bank", "branch"]) ||
+              "Assigned Bank File";
+
+            const amountText =
+              findValue(row, [
+                "loanamount",
+                "amount",
+                "outstanding",
+                "balance",
+              ]) || "0";
+
+            const pendingText =
+              findValue(row, ["pending", "due", "overdue", "outstanding"]) ||
+              amountText;
+
+            const caseArea =
+              findValue(row, ["area", "city", "location", "address"]) ||
+              executive.area;
+
+            return {
+              customer,
+              phone: mobile,
+              bank,
+              loanType:
+                findValue(row, ["loantype", "product", "type"]) || "Recovery",
+              amount:
+                Number(String(amountText).replace(/[^0-9.]/g, "")) || 0,
+              pendingAmount:
+                Number(String(pendingText).replace(/[^0-9.]/g, "")) || 0,
+              area: caseArea,
+              remarks: `Uploaded directly for ${formatAgentCode(
+                executive.id,
+                executive.agent_code
+              )} - ${executive.name}. File: ${file.name}`,
+            };
+          })
+          .filter((item) => item.customer || item.phone || item.amount > 0);
+
+        if (parsedCases.length === 0) {
+          alert("Excel read hui, lekin valid cases nahi mile.");
+          return;
+        }
+
+        const confirmImport = window.confirm(
+          `${parsedCases.length} cases directly ${executive.name} ko assign honge.\n\nImport karein?`
+        );
+
+        if (!confirmImport) return;
+
+        const rowsToInsert = parsedCases.map((item) => ({
+          customer_name: item.customer || "Unknown Customer",
+          mobile: item.phone,
+          bank_name: item.bank,
+          loan_type: item.loanType,
+          loan_amount: item.amount,
+          pending_amount: item.pendingAmount || item.amount,
+          address: item.area,
+          status: "Pending",
+          assigned_agent: executive.id,
+          remarks: item.remarks,
+        }));
+
+        const chunkSize = 500;
+        let imported = 0;
+
+        for (let i = 0; i < rowsToInsert.length; i += chunkSize) {
+          const chunk = rowsToInsert.slice(i, i + chunkSize);
+          const { error } = await supabase.from("cases").insert(chunk);
+
+          if (error) {
+            alert("Upload cases error: " + error.message);
+            return;
+          }
+
+          imported += chunk.length;
+        }
+
+        await supabase
+          .from("agents")
+          .update({ cases: (executive.cases || 0) + imported })
+          .eq("id", executive.id);
+
+        alert(
+          `Upload complete.\n${imported} cases assigned to ${executive.name}.`
+        );
+
+        loadExecutives();
+      } catch {
+        alert("Excel read error. File format check karo.");
+      }
+    };
+
+    reader.readAsArrayBuffer(file);
+  }
+
   return (
     <div className="module-card">
       <h2>👨‍💼 Field Executive Management</h2>
@@ -200,6 +355,7 @@ function ExecutiveManagement() {
             <th>Area</th>
             <th>Vehicle</th>
             <th>Assigned Cases</th>
+            <th>Upload Cases</th>
             <th>Live Status</th>
             <th>Last Seen</th>
             <th>Account Status</th>
@@ -218,6 +374,17 @@ function ExecutiveManagement() {
               <td>{item.area}</td>
               <td>{item.vehicle}</td>
               <td>{item.cases}</td>
+              <td>
+                <label className="primary-btn" style={{ cursor: "pointer" }}>
+                  Upload Cases
+                  <input
+                    type="file"
+                    accept=".xlsx,.xls"
+                    style={{ display: "none" }}
+                    onChange={(e) => uploadCasesForExecutive(item, e)}
+                  />
+                </label>
+              </td>
               <td>{item.is_online ? "🟢 Online" : "🔴 Offline"}</td>
               <td>{item.last_seen || "Not updated"}</td>
               <td>{item.status}</td>
