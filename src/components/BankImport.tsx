@@ -20,6 +20,8 @@ function BankImport() {
   const [fileName, setFileName] = useState("");
   const [status, setStatus] = useState<ImportStatus>("idle");
   const [cases, setCases] = useState<ImportedCase[]>([]);
+  const [importedCount, setImportedCount] = useState(0);
+  const [skippedCount, setSkippedCount] = useState(0);
 
   function findValue(row: Record<string, unknown>, keys: string[]) {
     const rowKeys = Object.keys(row);
@@ -28,11 +30,14 @@ function BankImport() {
       const foundKey = rowKeys.find((item) =>
         item.toLowerCase().replace(/\s/g, "").includes(key.toLowerCase())
       );
-
       if (foundKey) return String(row[foundKey] || "");
     }
 
     return "";
+  }
+
+  function makeKey(customer: string, phone: string, bank: string) {
+    return `${customer.trim().toLowerCase()}-${phone.trim()}-${bank.trim().toLowerCase()}`;
   }
 
   function handleFile(e: ChangeEvent<HTMLInputElement>) {
@@ -42,6 +47,8 @@ function BankImport() {
     setFileName(file.name);
     setStatus("idle");
     setCases([]);
+    setImportedCount(0);
+    setSkippedCount(0);
 
     const reader = new FileReader();
 
@@ -85,13 +92,20 @@ function BankImport() {
           })
           .filter((item) => item.customer || item.phone || item.amount > 0);
 
-        setCases(parsedCases);
+        const uniqueMap = new Map<string, ImportedCase>();
+
+        parsedCases.forEach((item) => {
+          const key = makeKey(item.customer, item.phone, item.bank);
+          if (!uniqueMap.has(key)) uniqueMap.set(key, item);
+        });
+
+        setCases(Array.from(uniqueMap.values()));
         setStatus("ready");
 
         if (parsedCases.length === 0) {
           alert("Excel file read hui, lekin valid cases nahi mile.");
         }
-      } catch (error) {
+      } catch {
         alert("Excel read error. File format check karo.");
         setStatus("idle");
       }
@@ -106,9 +120,46 @@ function BankImport() {
       return;
     }
 
-    setStatus("importing");
+    const ok = window.confirm(
+      `Real client data import kar rahe ho.\n\nTotal parsed cases: ${cases.length}\nDuplicate existing cases skip honge.\n\nImport continue karein?`
+    );
 
-    const rows = cases.map((item) => ({
+    if (!ok) return;
+
+    setStatus("importing");
+    setImportedCount(0);
+    setSkippedCount(0);
+
+    const { data: existingData, error: existingError } = await supabase
+      .from("cases")
+      .select("customer_name, mobile, bank_name");
+
+    if (existingError) {
+      alert("Existing cases check error: " + existingError.message);
+      setStatus("ready");
+      return;
+    }
+
+    const existingKeys = new Set(
+      (existingData || []).map((item: any) =>
+        makeKey(item.customer_name || "", item.mobile || "", item.bank_name || "")
+      )
+    );
+
+    const newCases = cases.filter(
+      (item) => !existingKeys.has(makeKey(item.customer, item.phone, item.bank))
+    );
+
+    const skipped = cases.length - newCases.length;
+    setSkippedCount(skipped);
+
+    if (newCases.length === 0) {
+      alert("Sab cases pehle se database me hain. New import nahi hua.");
+      setStatus("imported");
+      return;
+    }
+
+    const rows = newCases.map((item) => ({
       customer_name: item.customer || "Unknown Customer",
       mobile: item.phone,
       bank_name: item.bank,
@@ -120,24 +171,37 @@ function BankImport() {
       remarks: item.remarks,
     }));
 
-    const { error } = await supabase.from("cases").insert(rows);
+    const chunkSize = 500;
+    let totalImported = 0;
 
-    if (error) {
-      alert("Import error: " + error.message);
-      setStatus("ready");
-      return;
+    for (let i = 0; i < rows.length; i += chunkSize) {
+      const chunk = rows.slice(i, i + chunkSize);
+      const { error } = await supabase.from("cases").insert(chunk);
+
+      if (error) {
+        alert("Import error: " + error.message);
+        setStatus("ready");
+        return;
+      }
+
+      totalImported += chunk.length;
+      setImportedCount(totalImported);
     }
 
+    setImportedCount(totalImported);
     setStatus("imported");
-    alert(`${cases.length} cases imported successfully.`);
+
+    alert(
+      `Import complete.\nImported: ${totalImported}\nSkipped duplicates: ${skipped}`
+    );
   }
 
   return (
     <div className="module-card">
       <h1>📄 Bank Excel Import</h1>
       <p>
-        SBI ya Bank of Baroda ki Excel file upload karo, preview dekho, phir CRM
-        database me import karo.
+        Real bank Excel file safe import karo. Duplicate customer + phone + bank
+        records automatically skip honge.
       </p>
 
       <hr />
@@ -160,11 +224,11 @@ function BankImport() {
           <p><strong>Bank:</strong> {bankName}</p>
           <p><strong>File:</strong> {fileName}</p>
           <p><strong>Status:</strong> {status}</p>
-          <p><strong>Rows Found:</strong> {cases.length}</p>
+          <p><strong>Unique Rows Ready:</strong> {cases.length}</p>
 
-          {cases.length > 0 && (
+          {cases.length > 0 && status !== "importing" && (
             <button className="primary-btn" onClick={importCases}>
-              Import {cases.length} Cases to CRM Database
+              Safe Import {cases.length} Cases
             </button>
           )}
         </div>
@@ -202,20 +266,23 @@ function BankImport() {
             </tbody>
           </table>
 
-          <p>Showing first 20 rows. Total rows: {cases.length}</p>
+          <p>Showing first 20 rows. Total unique rows: {cases.length}</p>
         </div>
       )}
 
       {status === "importing" && (
         <div className="card">
           <h3>⏳ Importing cases...</h3>
+          <p>Imported so far: {importedCount}</p>
+          <p>Skipped duplicates: {skippedCount}</p>
         </div>
       )}
 
       {status === "imported" && (
         <div className="card">
-          <h3>✅ Import Successful</h3>
-          <p>{cases.length} bank cases imported into Supabase CRM.</p>
+          <h3>✅ Import Complete</h3>
+          <p>Imported: {importedCount}</p>
+          <p>Skipped duplicates: {skippedCount}</p>
         </div>
       )}
     </div>
