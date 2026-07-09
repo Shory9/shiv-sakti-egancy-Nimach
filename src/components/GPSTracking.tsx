@@ -31,6 +31,7 @@ type Visit = {
 function GPSTracking() {
   const [executives, setExecutives] = useState<Executive[]>([]);
   const [visits, setVisits] = useState<Visit[]>([]);
+  const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
 
   async function loadData() {
     const agentsResult = await supabase
@@ -59,7 +60,7 @@ function GPSTracking() {
 
   useEffect(() => {
     loadData();
-    const timer = window.setInterval(loadData, 30000);
+    const timer = window.setInterval(loadData, 15000);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -67,9 +68,11 @@ function GPSTracking() {
   const liveAgents = executives.filter((e) => e.last_latitude && e.last_longitude);
   const todayVisits = visits.length;
 
-  const mapAgent = liveAgents[0];
-  const mapLat = mapAgent?.last_latitude || visits[0]?.latitude;
-  const mapLng = mapAgent?.last_longitude || visits[0]?.longitude;
+  const selectedAgent =
+    liveAgents.find((e) => e.id === selectedAgentId) || liveAgents[0];
+
+  const mapLat = selectedAgent?.last_latitude || visits[0]?.latitude;
+  const mapLng = selectedAgent?.last_longitude || visits[0]?.longitude;
 
   return (
     <div className="module-card">
@@ -113,17 +116,33 @@ function GPSTracking() {
       <div className="module-card">
         <h3>🗺️ Live Tracking Map</h3>
         <p>
-          {mapAgent
-            ? `Showing live location: ${mapAgent.name}`
+          {selectedAgent
+            ? `Showing live location: ${selectedAgent.name}`
             : "Latest saved GPS location map par dikh rahi hai."}
         </p>
 
+        {liveAgents.length > 0 && (
+          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginBottom: "14px" }}>
+            {liveAgents.map((agent) => (
+              <button
+                key={agent.id}
+                className="primary-btn"
+                onClick={() => setSelectedAgentId(agent.id)}
+                style={{ opacity: selectedAgent?.id === agent.id ? 1 : 0.75 }}
+              >
+                {agent.is_online ? "🟢" : "🔴"} {agent.name}
+              </button>
+            ))}
+          </div>
+        )}
+
         {mapLat && mapLng ? (
           <iframe
+            key={`${mapLat}-${mapLng}`}
             title="Live GPS Map"
             src={`https://maps.google.com/maps?q=${mapLat},${mapLng}&z=16&output=embed`}
             width="100%"
-            height="320"
+            height="360"
             style={{
               border: 0,
               borderRadius: "18px",
@@ -176,7 +195,19 @@ function GPSTracking() {
 
             return (
               <tr key={item.id}>
-                <td>{item.name}</td>
+                <td>
+                  <button
+                    onClick={() => hasLive && setSelectedAgentId(item.id)}
+                    style={{
+                      border: 0,
+                      background: "transparent",
+                      cursor: hasLive ? "pointer" : "default",
+                      fontWeight: 700,
+                    }}
+                  >
+                    {item.name}
+                  </button>
+                </td>
                 <td>{item.phone}</td>
                 <td>{item.area}</td>
                 <td>{item.vehicle}</td>
