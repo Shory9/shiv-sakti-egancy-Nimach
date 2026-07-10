@@ -1,18 +1,50 @@
-import { type ChangeEvent, useState } from "react";
+import { type ChangeEvent, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import { supabase } from "../supabaseClient";
 
 type ImportStatus = "idle" | "ready" | "importing" | "imported";
 
+type AreaMapping = {
+  agentCode: string;
+  agentName: string;
+};
+
 type ImportedCase = {
+  accountNo: string;
   customer: string;
   phone: string;
   bank: string;
+  branch: string;
+  alpha: string;
   loanType: string;
   amount: number;
   pendingAmount: number;
-  area: string;
-  remarks: string;
+  address: string;
+};
+
+type Agent = {
+  id: number;
+  name: string;
+  agent_code: string | null;
+};
+
+const AREA_AGENT_MAP: Record<string, AreaMapping> = {
+  NEEMUC: {
+    agentCode: "SS025",
+    agentName: "Shultab Singh Panwar",
+  },
+  SAILAN: {
+    agentCode: "SS021",
+    agentName: "Rajesh",
+  },
+  MANASA: {
+    agentCode: "SS023",
+    agentName: "Rahul Kumar",
+  },
+  MANAWA: {
+    agentCode: "SS022",
+    agentName: "Babu Nagda",
+  },
 };
 
 function BankImport() {
@@ -20,98 +52,300 @@ function BankImport() {
   const [fileName, setFileName] = useState("");
   const [status, setStatus] = useState<ImportStatus>("idle");
   const [cases, setCases] = useState<ImportedCase[]>([]);
+
   const [importedCount, setImportedCount] = useState(0);
   const [skippedCount, setSkippedCount] = useState(0);
+  const [unassignedCount, setUnassignedCount] = useState(0);
 
-  function findValue(row: Record<string, unknown>, keys: string[]) {
+  function normalizeText(value: unknown) {
+    return String(value ?? "").trim();
+  }
+
+  function normalizeHeader(value: string) {
+    return value
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "");
+  }
+
+  function getValue(
+    row: Record<string, unknown>,
+    possibleHeaders: string[]
+  ) {
     const rowKeys = Object.keys(row);
 
-    for (const key of keys) {
-      const foundKey = rowKeys.find((item) =>
-        item.toLowerCase().replace(/\s/g, "").includes(key.toLowerCase())
+    for (const header of possibleHeaders) {
+      const wanted = normalizeHeader(header);
+
+      const exactKey = rowKeys.find(
+        (key) => normalizeHeader(key) === wanted
       );
-      if (foundKey) return String(row[foundKey] || "");
+
+      if (exactKey) {
+        return normalizeText(row[exactKey]);
+      }
+    }
+
+    for (const header of possibleHeaders) {
+      const wanted = normalizeHeader(header);
+
+      const partialKey = rowKeys.find((key) =>
+        normalizeHeader(key).includes(wanted)
+      );
+
+      if (partialKey) {
+        return normalizeText(row[partialKey]);
+      }
     }
 
     return "";
   }
 
-  function makeKey(customer: string, phone: string, bank: string) {
-    return `${customer.trim().toLowerCase()}-${phone.trim()}-${bank.trim().toLowerCase()}`;
+  function parseAmount(value: unknown) {
+    const cleaned = String(value ?? "")
+      .replace(/,/g, "")
+      .replace(/[^0-9.-]/g, "");
+
+    return Number(cleaned) || 0;
   }
 
-  function handleFile(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
+  function normalizeAccountNo(value: string) {
+    return value.replace(/\s/g, "").toUpperCase();
+  }
+
+  function makeCaseKey(item: {
+    accountNo?: string;
+    customer: string;
+    phone: string;
+    bank: string;
+  }) {
+    const accountNo = normalizeAccountNo(item.accountNo || "");
+
+    if (accountNo) {
+      return `ACCOUNT:${accountNo}`;
+    }
+
+    return [
+      "FALLBACK",
+      item.customer.trim().toLowerCase(),
+      item.phone.trim(),
+      item.bank.trim().toLowerCase(),
+    ].join("|");
+  }
+
+  function extractAccountNo(remarks: string | null) {
+    if (!remarks) return "";
+
+    const match = remarks.match(/Account No:\s*([^|]+)/i);
+    return match ? normalizeAccountNo(match[1]) : "";
+  }
+
+  async function loadAllExistingCases() {
+    const allRows: Array<{
+      customer_name: string | null;
+      mobile: string | null;
+      bank_name: string | null;
+      remarks: string | null;
+    }> = [];
+
+    const pageSize = 1000;
+    let from = 0;
+
+    while (true) {
+      const { data, error } = await supabase
+        .from("cases")
+        .select("customer_name, mobile, bank_name, remarks")
+        .range(from, from + pageSize - 1);
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      const rows = data || [];
+      allRows.push(...rows);
+
+      if (rows.length < pageSize) break;
+
+      from += pageSize;
+    }
+
+    return allRows;
+  }
+
+  function handleFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+
     if (!file) return;
 
     setFileName(file.name);
-    setStatus("idle");
     setCases([]);
     setImportedCount(0);
     setSkippedCount(0);
+    setUnassignedCount(0);
+    setStatus("idle");
 
     const reader = new FileReader();
 
-    reader.onload = (event) => {
+    reader.onload = (readerEvent) => {
       try {
-        const data = event.target?.result;
-        const workbook = XLSX.read(data, { type: "array" });
-        const sheetName = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[sheetName];
+        const fileData = readerEvent.target?.result;
 
-        const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet);
+        const workbook = XLSX.read(fileData, {
+          type: "array",
+        });
+
+        const firstSheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[firstSheetName];
+
+        const rows =
+          XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet);
 
         const parsedCases: ImportedCase[] = rows
           .map((row) => {
-            const customer =
-              findValue(row, ["customer", "name", "borrower", "party"]) || "";
+            const accountNo = getValue(row, [
+              "A/C No",
+              "Account No",
+              "Account Number",
+            ]);
 
-            const phone = findValue(row, ["mobile", "phone", "contact"]) || "";
+            const customer = getValue(row, [
+              "A/C Name",
+              "Customer Name",
+              "Borrower Name",
+              "Name",
+            ]);
 
-            const amountText =
-              findValue(row, ["loanamount", "amount", "outstanding", "balance"]) ||
-              "0";
+            const phone = getValue(row, [
+              "MOBILE NO",
+              "Mobile",
+              "Phone",
+              "Contact",
+            ]);
 
-            const pendingText =
-              findValue(row, ["pending", "due", "overdue", "outstanding"]) ||
-              amountText;
+            const alpha = getValue(row, ["Alpha"]).toUpperCase();
+
+            const branch = getValue(row, [
+              "Branch",
+              "Branch Name",
+            ]);
+
+            const loanType =
+              getValue(row, [
+                "Scheme Code",
+                "Loan Type",
+                "Product",
+              ]) || "Recovery";
+
+            const balanceText = getValue(row, [
+              "Balance [INR]",
+              "Balance",
+              "Outstanding",
+              "Loan Amount",
+            ]);
+
+            const address = getValue(row, [
+              "ADDRESS",
+              "Address",
+              "Location",
+            ]);
+
+            const amount = parseAmount(balanceText);
 
             return {
+              accountNo,
               customer,
               phone,
               bank: bankName,
-              loanType:
-                findValue(row, ["loantype", "product", "type"]) || "Recovery",
-              amount: Number(String(amountText).replace(/[^0-9.]/g, "")) || 0,
-              pendingAmount:
-                Number(String(pendingText).replace(/[^0-9.]/g, "")) || 0,
-              area:
-                findValue(row, ["area", "city", "location", "address"]) || "",
-              remarks: `Imported from ${bankName} Excel: ${file.name}`,
+              branch,
+              alpha,
+              loanType,
+              amount,
+              pendingAmount: amount,
+              address,
             };
           })
-          .filter((item) => item.customer || item.phone || item.amount > 0);
+          .filter(
+            (item) =>
+              item.accountNo ||
+              item.customer ||
+              item.phone ||
+              item.amount > 0
+          );
 
-        const uniqueMap = new Map<string, ImportedCase>();
+        const uniqueCases = new Map<string, ImportedCase>();
 
         parsedCases.forEach((item) => {
-          const key = makeKey(item.customer, item.phone, item.bank);
-          if (!uniqueMap.has(key)) uniqueMap.set(key, item);
+          const key = makeCaseKey(item);
+
+          if (!uniqueCases.has(key)) {
+            uniqueCases.set(key, item);
+          }
         });
 
-        setCases(Array.from(uniqueMap.values()));
+        const readyCases = Array.from(uniqueCases.values());
+
+        setCases(readyCases);
         setStatus("ready");
 
-        if (parsedCases.length === 0) {
-          alert("Excel file read hui, lekin valid cases nahi mile.");
+        if (readyCases.length === 0) {
+          alert(
+            "Excel read hui, lekin valid bank cases nahi mile."
+          );
         }
       } catch {
-        alert("Excel read error. File format check karo.");
         setStatus("idle");
+        alert("Excel read error. File format check karo.");
       }
     };
 
     reader.readAsArrayBuffer(file);
+  }
+
+  const areaSummary = useMemo(() => {
+    const summary = new Map<string, number>();
+
+    cases.forEach((item) => {
+      const area = item.alpha || "NO AREA";
+      summary.set(area, (summary.get(area) || 0) + 1);
+    });
+
+    return Array.from(summary.entries())
+      .map(([area, count]) => ({
+        area,
+        count,
+        mapping: AREA_AGENT_MAP[area],
+      }))
+      .sort((a, b) => b.count - a.count);
+  }, [cases]);
+
+  const mappedPreviewCount = useMemo(
+    () =>
+      cases.filter((item) => Boolean(AREA_AGENT_MAP[item.alpha]))
+        .length,
+    [cases]
+  );
+
+  const unmappedPreviewCount =
+    cases.length - mappedPreviewCount;
+
+  async function refreshAgentCaseCounts(agentIds: number[]) {
+    const uniqueAgentIds = Array.from(new Set(agentIds));
+
+    for (const agentId of uniqueAgentIds) {
+      const { count, error } = await supabase
+        .from("cases")
+        .select("id", {
+          count: "exact",
+          head: true,
+        })
+        .eq("assigned_agent", agentId);
+
+      if (!error) {
+        await supabase
+          .from("agents")
+          .update({ cases: count || 0 })
+          .eq("id", agentId);
+      }
+    }
   }
 
   async function importCases() {
@@ -120,67 +354,201 @@ function BankImport() {
       return;
     }
 
-    const ok = window.confirm(
-      `Real client data import kar rahe ho.\n\nTotal parsed cases: ${cases.length}\nDuplicate existing cases skip honge.\n\nImport continue karein?`
+    const confirmImport = window.confirm(
+      [
+        "Area-wise automatic case assignment",
+        "",
+        `Total unique cases: ${cases.length}`,
+        `Mapped cases: ${mappedPreviewCount}`,
+        `Unmapped cases: ${unmappedPreviewCount}`,
+        "",
+        "Mapped cases correct executives ko assign honge.",
+        "Unmapped areas ke cases safe Unassigned rahenge.",
+        "Existing duplicate accounts skip honge.",
+        "",
+        "Import continue karein?",
+      ].join("\n")
     );
 
-    if (!ok) return;
+    if (!confirmImport) return;
 
     setStatus("importing");
     setImportedCount(0);
     setSkippedCount(0);
+    setUnassignedCount(0);
 
-    const { data: existingData, error: existingError } = await supabase
-      .from("cases")
-      .select("customer_name, mobile, bank_name");
+    const { data: agentsData, error: agentsError } =
+      await supabase
+        .from("agents")
+        .select("id, name, agent_code")
+        .eq("status", "Active");
 
-    if (existingError) {
-      alert("Existing cases check error: " + existingError.message);
+    if (agentsError) {
+      alert(
+        "Executive list load error: " + agentsError.message
+      );
       setStatus("ready");
       return;
     }
 
-    const existingKeys = new Set(
-      (existingData || []).map((item: any) =>
-        makeKey(item.customer_name || "", item.mobile || "", item.bank_name || "")
-      )
-    );
+    const agents = (agentsData || []) as Agent[];
+
+    const agentsByCode = new Map<string, Agent>();
+
+    agents.forEach((agent) => {
+      const code = String(agent.agent_code || "")
+        .trim()
+        .toUpperCase();
+
+      if (code) agentsByCode.set(code, agent);
+    });
+
+    let existingData;
+
+    try {
+      existingData = await loadAllExistingCases();
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unknown database error";
+
+      alert("Existing cases check error: " + message);
+      setStatus("ready");
+      return;
+    }
+
+    const existingKeys = new Set<string>();
+
+    existingData.forEach((item) => {
+      const accountNo = extractAccountNo(item.remarks);
+
+      existingKeys.add(
+        makeCaseKey({
+          accountNo,
+          customer: item.customer_name || "",
+          phone: item.mobile || "",
+          bank: item.bank_name || "",
+        })
+      );
+    });
 
     const newCases = cases.filter(
-      (item) => !existingKeys.has(makeKey(item.customer, item.phone, item.bank))
+      (item) => !existingKeys.has(makeCaseKey(item))
     );
 
     const skipped = cases.length - newCases.length;
     setSkippedCount(skipped);
 
     if (newCases.length === 0) {
-      alert("Sab cases pehle se database me hain. New import nahi hua.");
       setStatus("imported");
+
+      alert(
+        [
+          "Import complete.",
+          "",
+          "New imported: 0",
+          `Skipped duplicates: ${skipped}`,
+          "",
+          "Sab accounts pehle se database me hain.",
+        ].join("\n")
+      );
+
       return;
     }
 
-    const rows = newCases.map((item) => ({
-      customer_name: item.customer || "Unknown Customer",
-      mobile: item.phone,
-      bank_name: item.bank,
-      loan_type: item.loanType,
-      loan_amount: item.amount,
-      pending_amount: item.pendingAmount || item.amount,
-      address: item.area,
-      status: "Pending",
-      remarks: item.remarks,
-    }));
+    let unassigned = 0;
+    const assignedAgentIds: number[] = [];
 
-    const chunkSize = 500;
+    const rowsToInsert = newCases.map((item) => {
+      const mapping = AREA_AGENT_MAP[item.alpha];
+
+      const mappedAgent = mapping
+        ? agentsByCode.get(mapping.agentCode.toUpperCase())
+        : undefined;
+
+      if (!mappedAgent) {
+        unassigned += 1;
+      } else {
+        assignedAgentIds.push(mappedAgent.id);
+      }
+
+      const assignmentText = mappedAgent
+        ? `${mappedAgent.agent_code || mapping?.agentCode} - ${
+            mappedAgent.name
+          }`
+        : "Unassigned";
+
+      return {
+        customer_name:
+          item.customer || "Unknown Customer",
+
+        mobile: item.phone,
+
+        bank_name: item.branch
+          ? `${bankName} | ${item.branch}`
+          : bankName,
+
+        loan_type: item.loanType,
+
+        loan_amount: item.amount,
+
+        pending_amount:
+          item.pendingAmount || item.amount,
+
+        address: item.address,
+
+        status: "Pending",
+
+        assigned_agent: mappedAgent
+          ? mappedAgent.id
+          : null,
+
+        remarks: [
+          `Account No: ${item.accountNo || "Not Available"}`,
+          `Alpha: ${item.alpha || "Not Available"}`,
+          `Branch: ${item.branch || "Not Available"}`,
+          `Auto Assignment: ${assignmentText}`,
+          `Source File: ${fileName}`,
+        ].join(" | "),
+      };
+    });
+
+    setUnassignedCount(unassigned);
+
+    const chunkSize = 250;
     let totalImported = 0;
 
-    for (let i = 0; i < rows.length; i += chunkSize) {
-      const chunk = rows.slice(i, i + chunkSize);
-      const { error } = await supabase.from("cases").insert(chunk);
+    for (
+      let index = 0;
+      index < rowsToInsert.length;
+      index += chunkSize
+    ) {
+      const chunk = rowsToInsert.slice(
+        index,
+        index + chunkSize
+      );
+
+      const { error } = await supabase
+        .from("cases")
+        .insert(chunk);
 
       if (error) {
-        alert("Import error: " + error.message);
+        setImportedCount(totalImported);
         setStatus("ready");
+
+        alert(
+          [
+            "Import stopped.",
+            "",
+            `Successfully imported before error: ${totalImported}`,
+            `Error: ${error.message}`,
+            "",
+            "Same file dobara upload kar sakte ho.",
+            "Already imported account numbers automatically skip honge.",
+          ].join("\n")
+        );
+
         return;
       }
 
@@ -188,26 +556,45 @@ function BankImport() {
       setImportedCount(totalImported);
     }
 
+    await refreshAgentCaseCounts(assignedAgentIds);
+
     setImportedCount(totalImported);
     setStatus("imported");
 
     alert(
-      `Import complete.\nImported: ${totalImported}\nSkipped duplicates: ${skipped}`
+      [
+        "Area-wise import complete.",
+        "",
+        `Imported: ${totalImported}`,
+        `Skipped duplicates: ${skipped}`,
+        `Assigned automatically: ${
+          totalImported - unassigned
+        }`,
+        `Unassigned: ${unassigned}`,
+      ].join("\n")
     );
   }
 
   return (
     <div className="module-card">
-      <h1>📄 Bank Excel Import</h1>
+      <h1>📄 Bank Excel Auto Assignment</h1>
+
       <p>
-        Real bank Excel file safe import karo. Duplicate customer + phone + bank
-        records automatically skip honge.
+        Ek hi bank Excel upload karo. System Alpha area ke
+        hisaab se cases automatically correct executive ko
+        assign karega.
       </p>
 
       <hr />
 
       <h3>Select Bank</h3>
-      <select value={bankName} onChange={(e) => setBankName(e.target.value)}>
+
+      <select
+        value={bankName}
+        onChange={(event) =>
+          setBankName(event.target.value)
+        }
+      >
         <option>State Bank of India (SBI)</option>
         <option>Bank of Baroda (BOB)</option>
       </select>
@@ -215,74 +602,189 @@ function BankImport() {
       <br />
       <br />
 
-      <h3>Select Bank Excel File</h3>
-      <input type="file" accept=".xlsx,.xls" onChange={handleFile} />
+      <h3>Select Complete Bank Excel</h3>
+
+      <input
+        type="file"
+        accept=".xlsx,.xls"
+        onChange={handleFile}
+      />
 
       {fileName && (
         <div className="card">
           <h3>Selected File</h3>
-          <p><strong>Bank:</strong> {bankName}</p>
-          <p><strong>File:</strong> {fileName}</p>
-          <p><strong>Status:</strong> {status}</p>
-          <p><strong>Unique Rows Ready:</strong> {cases.length}</p>
 
-          {cases.length > 0 && status !== "importing" && (
-            <button className="primary-btn" onClick={importCases}>
-              Safe Import {cases.length} Cases
-            </button>
-          )}
+          <p>
+            <strong>Bank:</strong> {bankName}
+          </p>
+
+          <p>
+            <strong>File:</strong> {fileName}
+          </p>
+
+          <p>
+            <strong>Status:</strong> {status}
+          </p>
+
+          <p>
+            <strong>Unique Cases Ready:</strong>{" "}
+            {cases.length}
+          </p>
+
+          <p>
+            <strong>Auto Assigned Preview:</strong>{" "}
+            {mappedPreviewCount}
+          </p>
+
+          <p>
+            <strong>Unmapped / Unassigned:</strong>{" "}
+            {unmappedPreviewCount}
+          </p>
+
+          {cases.length > 0 &&
+            status !== "importing" && (
+              <button
+                className="primary-btn"
+                onClick={importCases}
+              >
+                Auto Assign & Import {cases.length} Cases
+              </button>
+            )}
+        </div>
+      )}
+
+      {areaSummary.length > 0 && (
+        <div className="card">
+          <h3>Area-wise Assignment Preview</h3>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Alpha Area</th>
+                <th>Total Cases</th>
+                <th>Assigned Agent</th>
+                <th>Import Status</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {areaSummary.map((item) => (
+                <tr key={item.area}>
+                  <td>
+                    <strong>{item.area}</strong>
+                  </td>
+
+                  <td>{item.count}</td>
+
+                  <td>
+                    {item.mapping
+                      ? `${item.mapping.agentCode} - ${item.mapping.agentName}`
+                      : "No Agent Mapping"}
+                  </td>
+
+                  <td>
+                    {item.mapping
+                      ? "✅ Auto Assign"
+                      : "⚠️ Unassigned"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 
       {cases.length > 0 && (
         <div className="card">
-          <h3>Generated Cases Preview</h3>
+          <h3>Bank Cases Preview</h3>
 
           <table>
             <thead>
               <tr>
+                <th>Account No.</th>
                 <th>Customer</th>
-                <th>Phone</th>
-                <th>Bank</th>
-                <th>Loan Type</th>
-                <th>Loan Amount</th>
-                <th>Pending</th>
-                <th>Area</th>
+                <th>Mobile</th>
+                <th>Alpha</th>
+                <th>Branch</th>
+                <th>Balance</th>
+                <th>Target Agent</th>
               </tr>
             </thead>
 
             <tbody>
-              {cases.slice(0, 20).map((item, index) => (
-                <tr key={index}>
-                  <td>{item.customer}</td>
-                  <td>{item.phone}</td>
-                  <td>{item.bank}</td>
-                  <td>{item.loanType}</td>
-                  <td>₹{item.amount.toLocaleString("en-IN")}</td>
-                  <td>₹{item.pendingAmount.toLocaleString("en-IN")}</td>
-                  <td>{item.area}</td>
-                </tr>
-              ))}
+              {cases.slice(0, 20).map((item, index) => {
+                const mapping =
+                  AREA_AGENT_MAP[item.alpha];
+
+                return (
+                  <tr
+                    key={`${item.accountNo}-${index}`}
+                  >
+                    <td>{item.accountNo}</td>
+                    <td>{item.customer}</td>
+                    <td>{item.phone}</td>
+                    <td>{item.alpha}</td>
+                    <td>{item.branch}</td>
+                    <td>
+                      ₹
+                      {item.amount.toLocaleString(
+                        "en-IN"
+                      )}
+                    </td>
+                    <td>
+                      {mapping
+                        ? `${mapping.agentCode} - ${mapping.agentName}`
+                        : "Unassigned"}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
 
-          <p>Showing first 20 rows. Total unique rows: {cases.length}</p>
+          <p>
+            First 20 cases shown. Total unique cases:{" "}
+            {cases.length}
+          </p>
         </div>
       )}
 
       {status === "importing" && (
         <div className="card">
-          <h3>⏳ Importing cases...</h3>
-          <p>Imported so far: {importedCount}</p>
-          <p>Skipped duplicates: {skippedCount}</p>
+          <h3>⏳ Area-wise cases importing...</h3>
+
+          <p>
+            Imported so far: {importedCount}
+          </p>
+
+          <p>
+            Skipped duplicates: {skippedCount}
+          </p>
+
+          <p>
+            Unassigned cases: {unassignedCount}
+          </p>
         </div>
       )}
 
       {status === "imported" && (
         <div className="card">
           <h3>✅ Import Complete</h3>
+
           <p>Imported: {importedCount}</p>
-          <p>Skipped duplicates: {skippedCount}</p>
+
+          <p>
+            Skipped duplicates: {skippedCount}
+          </p>
+
+          <p>
+            Auto assigned:{" "}
+            {importedCount - unassignedCount}
+          </p>
+
+          <p>
+            Unassigned: {unassignedCount}
+          </p>
         </div>
       )}
     </div>
