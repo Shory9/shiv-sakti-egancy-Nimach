@@ -26,6 +26,28 @@ type ImportedCase = {
   remarks: string;
 };
 
+const WORKING_AREAS = [
+  "CRPF Neemuch",
+  "Pustak Bajar Neemuch",
+  "Neemuch",
+  "Manasa",
+  "Mandsaur",
+  "MEN DB Mandsaur",
+  "Jaora",
+  "Bilpank",
+  "Khachrod",
+  "Sailana",
+  "Station Road Ratlam",
+  "Alkapuri Ratlam",
+  "College Road Ratlam",
+  "Chandni Chowk Ratlam",
+  "Bamaniya",
+  "Petlawad",
+  "Dhar",
+  "Manavar",
+  "Tonki",
+];
+
 function ExecutiveManagement() {
   const [executives, setExecutives] = useState<Executive[]>([]);
   const [name, setName] = useState("");
@@ -42,10 +64,15 @@ function ExecutiveManagement() {
 
     for (const key of keys) {
       const foundKey = rowKeys.find((item) =>
-        item.toLowerCase().replace(/\s/g, "").includes(key.toLowerCase())
+        item
+          .toLowerCase()
+          .replace(/\s/g, "")
+          .includes(key.toLowerCase())
       );
 
-      if (foundKey) return String(row[foundKey] || "");
+      if (foundKey) {
+        return String(row[foundKey] || "");
+      }
     }
 
     return "";
@@ -70,9 +97,9 @@ function ExecutiveManagement() {
         phone: item.phone || "",
         area: item.area || "",
         vehicle: item.vehicle || "",
-        cases: item.cases || 0,
+        cases: Number(item.cases || 0),
         status: item.status === "Inactive" ? "Inactive" : "Active",
-        is_online: item.is_online || false,
+        is_online: Boolean(item.is_online),
         last_seen: item.last_seen || "",
       }))
     );
@@ -84,7 +111,7 @@ function ExecutiveManagement() {
 
   async function addExecutive() {
     if (!name.trim() || !phone.trim() || !area.trim()) {
-      alert("Name, phone aur area required hai.");
+      alert("Name, phone aur working area required hai.");
       return;
     }
 
@@ -103,49 +130,97 @@ function ExecutiveManagement() {
       .single();
 
     if (error || !data) {
-      alert("Executive add error: " + (error?.message || "Unknown error"));
+      alert(
+        "Executive add error: " +
+          (error?.message || "Unknown error")
+      );
       return;
     }
 
-    const agentCode = "SS" + String(data.id).padStart(3, "0");
+    const agentCode =
+      "SS" + String(data.id).padStart(3, "0");
 
-    await supabase
+    const { error: codeError } = await supabase
       .from("agents")
       .update({ agent_code: agentCode })
       .eq("id", data.id);
+
+    if (codeError) {
+      alert(
+        "Agent code update error: " + codeError.message
+      );
+      return;
+    }
 
     setName("");
     setPhone("");
     setArea("");
     setVehicle("");
-    loadExecutives();
 
-    alert(`Executive added successfully.\nAgent Code: ${agentCode}`);
+    await loadExecutives();
+
+    alert(
+      `Executive added successfully.\nAgent Code: ${agentCode}\nWorking Area: ${area}`
+    );
   }
 
-  async function deleteExecutive(id: number) {
+  async function deleteExecutive(item: Executive) {
     const ok = window.confirm(
-      "Is executive ko delete karna hai? Agar cases assigned hain to pehle unhe reassign kar lo."
+      `${formatAgentCode(item.id, item.agent_code)} - ${
+        item.name
+      } ko permanently delete karna hai?\n\nIs executive ke assigned cases bhi delete ho jayenge.`
     );
 
     if (!ok) return;
 
-    const { error } = await supabase.from("agents").delete().eq("id", id);
+    const { error: casesError } = await supabase
+      .from("cases")
+      .delete()
+      .eq("assigned_agent", item.id);
 
-    if (error) {
-      alert("Executive delete error: " + error.message);
+    if (casesError) {
+      alert(
+        "Executive cases delete error: " +
+          casesError.message
+      );
       return;
     }
 
-    setExecutives(executives.filter((e) => e.id !== id));
+    const { error: executiveError } = await supabase
+      .from("agents")
+      .delete()
+      .eq("id", item.id);
+
+    if (executiveError) {
+      alert(
+        "Executive delete error: " +
+          executiveError.message
+      );
+      return;
+    }
+
+    setExecutives((old) =>
+      old.filter((executive) => executive.id !== item.id)
+    );
+
+    alert(
+      `${item.name} aur uske assigned cases delete ho gaye.`
+    );
   }
 
   async function toggleStatus(item: Executive) {
-    const nextStatus = item.status === "Active" ? "Inactive" : "Active";
+    const nextStatus =
+      item.status === "Active" ? "Inactive" : "Active";
 
     const { error } = await supabase
       .from("agents")
-      .update({ status: nextStatus })
+      .update({
+        status: nextStatus,
+        is_online:
+          nextStatus === "Inactive"
+            ? false
+            : item.is_online || false,
+      })
       .eq("id", item.id);
 
     if (error) {
@@ -153,52 +228,91 @@ function ExecutiveManagement() {
       return;
     }
 
-    setExecutives(
-      executives.map((e) =>
-        e.id === item.id ? { ...e, status: nextStatus } : e
+    setExecutives((old) =>
+      old.map((executive) =>
+        executive.id === item.id
+          ? {
+              ...executive,
+              status: nextStatus,
+              is_online:
+                nextStatus === "Inactive"
+                  ? false
+                  : executive.is_online,
+            }
+          : executive
       )
     );
   }
 
   async function uploadCasesForExecutive(
     executive: Executive,
-    e: ChangeEvent<HTMLInputElement>
+    event: ChangeEvent<HTMLInputElement>
   ) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
+    const file = event.target.files?.[0];
+
+    event.target.value = "";
 
     if (!file) return;
 
     const ok = window.confirm(
-      `${formatAgentCode(executive.id, executive.agent_code)} - ${executive.name} ke liye cases upload kar rahe ho.\n\nFile: ${file.name}\n\nContinue?`
+      `${formatAgentCode(
+        executive.id,
+        executive.agent_code
+      )} - ${
+        executive.name
+      } ke liye cases upload kar rahe ho.\n\nArea: ${
+        executive.area
+      }\nFile: ${file.name}\n\nContinue?`
     );
 
     if (!ok) return;
 
     const reader = new FileReader();
 
-    reader.onload = async (event) => {
+    reader.onload = async (readerEvent) => {
       try {
-        const data = event.target?.result;
-        const workbook = XLSX.read(data, { type: "array" });
+        const data = readerEvent.target?.result;
+
+        const workbook = XLSX.read(data, {
+          type: "array",
+        });
+
         const sheetName = workbook.SheetNames[0];
         const sheet = workbook.Sheets[sheetName];
 
-        const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet);
+        const rows =
+          XLSX.utils.sheet_to_json<Record<string, unknown>>(
+            sheet
+          );
 
         const parsedCases: ImportedCase[] = rows
           .map((row) => {
             const customer =
-              findValue(row, ["customer", "name", "borrower", "party"]) || "";
+              findValue(row, [
+                "a/cname",
+                "customer",
+                "name",
+                "borrower",
+                "party",
+              ]) || "";
 
-            const mobile = findValue(row, ["mobile", "phone", "contact"]) || "";
+            const mobile =
+              findValue(row, [
+                "mobileno",
+                "mobile",
+                "phone",
+                "contact",
+              ]) || "";
 
             const bank =
-              findValue(row, ["bank", "branch"]) ||
-              "Assigned Bank File";
+              findValue(row, [
+                "branch",
+                "bank",
+              ]) || "Assigned Bank File";
 
             const amountText =
               findValue(row, [
+                "balance[inr]",
                 "loanamount",
                 "amount",
                 "outstanding",
@@ -206,34 +320,70 @@ function ExecutiveManagement() {
               ]) || "0";
 
             const pendingText =
-              findValue(row, ["pending", "due", "overdue", "outstanding"]) ||
-              amountText;
+              findValue(row, [
+                "pending",
+                "due",
+                "overdue",
+                "outstanding",
+                "balance[inr]",
+              ]) || amountText;
 
             const caseArea =
-              findValue(row, ["area", "city", "location", "address"]) ||
-              executive.area;
+              findValue(row, [
+                "area",
+                "alpha",
+                "city",
+                "location",
+                "address",
+              ]) || executive.area;
 
             return {
               customer,
               phone: mobile,
               bank,
               loanType:
-                findValue(row, ["loantype", "product", "type"]) || "Recovery",
+                findValue(row, [
+                  "schemecode",
+                  "loantype",
+                  "product",
+                  "type",
+                ]) || "Recovery",
+
               amount:
-                Number(String(amountText).replace(/[^0-9.]/g, "")) || 0,
+                Number(
+                  String(amountText)
+                    .replace(/,/g, "")
+                    .replace(/[^0-9.-]/g, "")
+                ) || 0,
+
               pendingAmount:
-                Number(String(pendingText).replace(/[^0-9.]/g, "")) || 0,
+                Number(
+                  String(pendingText)
+                    .replace(/,/g, "")
+                    .replace(/[^0-9.-]/g, "")
+                ) || 0,
+
               area: caseArea,
+
               remarks: `Uploaded directly for ${formatAgentCode(
                 executive.id,
                 executive.agent_code
-              )} - ${executive.name}. File: ${file.name}`,
+              )} - ${executive.name}. Working Area: ${
+                executive.area
+              }. File: ${file.name}`,
             };
           })
-          .filter((item) => item.customer || item.phone || item.amount > 0);
+          .filter(
+            (item) =>
+              item.customer ||
+              item.phone ||
+              item.amount > 0
+          );
 
         if (parsedCases.length === 0) {
-          alert("Excel read hui, lekin valid cases nahi mile.");
+          alert(
+            "Excel read hui, lekin valid cases nahi mile."
+          );
           return;
         }
 
@@ -244,45 +394,75 @@ function ExecutiveManagement() {
         if (!confirmImport) return;
 
         const rowsToInsert = parsedCases.map((item) => ({
-          customer_name: item.customer || "Unknown Customer",
+          customer_name:
+            item.customer || "Unknown Customer",
+
           mobile: item.phone,
           bank_name: item.bank,
           loan_type: item.loanType,
           loan_amount: item.amount,
-          pending_amount: item.pendingAmount || item.amount,
+
+          pending_amount:
+            item.pendingAmount || item.amount,
+
           address: item.area,
           status: "Pending",
           assigned_agent: executive.id,
           remarks: item.remarks,
         }));
 
-        const chunkSize = 500;
+        const chunkSize = 250;
         let imported = 0;
 
-        for (let i = 0; i < rowsToInsert.length; i += chunkSize) {
-          const chunk = rowsToInsert.slice(i, i + chunkSize);
-          const { error } = await supabase.from("cases").insert(chunk);
+        for (
+          let index = 0;
+          index < rowsToInsert.length;
+          index += chunkSize
+        ) {
+          const chunk = rowsToInsert.slice(
+            index,
+            index + chunkSize
+          );
+
+          const { error } = await supabase
+            .from("cases")
+            .insert(chunk);
 
           if (error) {
-            alert("Upload cases error: " + error.message);
+            alert(
+              `Upload stopped.\nImported before error: ${imported}\nError: ${error.message}`
+            );
             return;
           }
 
           imported += chunk.length;
         }
 
-        await supabase
-          .from("agents")
-          .update({ cases: (executive.cases || 0) + imported })
-          .eq("id", executive.id);
+        const { count, error: countError } =
+          await supabase
+            .from("cases")
+            .select("id", {
+              count: "exact",
+              head: true,
+            })
+            .eq("assigned_agent", executive.id);
+
+        if (!countError) {
+          await supabase
+            .from("agents")
+            .update({ cases: count || 0 })
+            .eq("id", executive.id);
+        }
+
+        await loadExecutives();
 
         alert(
           `Upload complete.\n${imported} cases assigned to ${executive.name}.`
         );
-
-        loadExecutives();
       } catch {
-        alert("Excel read error. File format check karo.");
+        alert(
+          "Excel read error. File format check karo."
+        );
       }
     };
 
@@ -292,9 +472,11 @@ function ExecutiveManagement() {
   return (
     <div className="module-card">
       <h2>👨‍💼 Field Executive Management</h2>
+
       <p>
-        Recovery agency ke real field executives, agent code, mobile number,
-        working area aur live status manage karo.
+        Field executives add karo aur unka fixed Working
+        Area select karo. Bank Excel ke cases isi area ke
+        hisaab se automatically assign honge.
       </p>
 
       <hr />
@@ -304,7 +486,9 @@ function ExecutiveManagement() {
       <input
         placeholder="Executive Full Name"
         value={name}
-        onChange={(e) => setName(e.target.value)}
+        onChange={(event) =>
+          setName(event.target.value)
+        }
       />
 
       <br />
@@ -313,17 +497,33 @@ function ExecutiveManagement() {
       <input
         placeholder="Mobile Number"
         value={phone}
-        onChange={(e) => setPhone(e.target.value)}
+        onChange={(event) =>
+          setPhone(event.target.value)
+        }
       />
 
       <br />
       <br />
 
-      <input
-        placeholder="Working Area / Route"
+      <select
         value={area}
-        onChange={(e) => setArea(e.target.value)}
-      />
+        onChange={(event) =>
+          setArea(event.target.value)
+        }
+      >
+        <option value="">
+          Select Working Area
+        </option>
+
+        {WORKING_AREAS.map((workingArea) => (
+          <option
+            key={workingArea}
+            value={workingArea}
+          >
+            {workingArea}
+          </option>
+        ))}
+      </select>
 
       <br />
       <br />
@@ -331,13 +531,18 @@ function ExecutiveManagement() {
       <input
         placeholder="Vehicle Number / Vehicle Type"
         value={vehicle}
-        onChange={(e) => setVehicle(e.target.value)}
+        onChange={(event) =>
+          setVehicle(event.target.value)
+        }
       />
 
       <br />
       <br />
 
-      <button className="primary-btn" onClick={addExecutive}>
+      <button
+        className="primary-btn"
+        onClick={addExecutive}
+      >
         + Add Field Executive
       </button>
 
@@ -352,7 +557,7 @@ function ExecutiveManagement() {
             <th>Agent Code</th>
             <th>Name</th>
             <th>Phone</th>
-            <th>Area</th>
+            <th>Working Area</th>
             <th>Vehicle</th>
             <th>Assigned Cases</th>
             <th>Upload Cases</th>
@@ -367,37 +572,85 @@ function ExecutiveManagement() {
           {executives.map((item) => (
             <tr key={item.id}>
               <td>
-                <strong>{formatAgentCode(item.id, item.agent_code)}</strong>
+                <strong>
+                  {formatAgentCode(
+                    item.id,
+                    item.agent_code
+                  )}
+                </strong>
               </td>
+
               <td>{item.name}</td>
               <td>{item.phone}</td>
               <td>{item.area}</td>
-              <td>{item.vehicle}</td>
+              <td>{item.vehicle || "-"}</td>
               <td>{item.cases}</td>
+
               <td>
-                <label className="primary-btn" style={{ cursor: "pointer" }}>
+                <label
+                  className="primary-btn"
+                  style={{
+                    cursor: "pointer",
+                    display: "inline-block",
+                  }}
+                >
                   Upload Cases
+
                   <input
                     type="file"
                     accept=".xlsx,.xls"
                     style={{ display: "none" }}
-                    onChange={(e) => uploadCasesForExecutive(item, e)}
+                    onChange={(event) =>
+                      uploadCasesForExecutive(
+                        item,
+                        event
+                      )
+                    }
                   />
                 </label>
               </td>
-              <td>{item.is_online ? "🟢 Online" : "🔴 Offline"}</td>
-              <td>{item.last_seen || "Not updated"}</td>
-              <td>{item.status}</td>
+
               <td>
-                <button onClick={() => toggleStatus(item)}>
-                  {item.status === "Active" ? "Deactivate" : "Activate"}
+                {item.is_online
+                  ? "🟢 Online"
+                  : "🔴 Offline"}
+              </td>
+
+              <td>
+                {item.last_seen || "Not updated"}
+              </td>
+
+              <td>{item.status}</td>
+
+              <td>
+                <button
+                  onClick={() =>
+                    toggleStatus(item)
+                  }
+                >
+                  {item.status === "Active"
+                    ? "Deactivate"
+                    : "Activate"}
                 </button>{" "}
-                <button onClick={() => deleteExecutive(item.id)}>
+
+                <button
+                  onClick={() =>
+                    deleteExecutive(item)
+                  }
+                >
                   Delete
                 </button>
               </td>
             </tr>
           ))}
+
+          {executives.length === 0 && (
+            <tr>
+              <td colSpan={11}>
+                No executives added yet.
+              </td>
+            </tr>
+          )}
         </tbody>
       </table>
     </div>
