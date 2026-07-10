@@ -4,11 +4,6 @@ import { supabase } from "../supabaseClient";
 
 type ImportStatus = "idle" | "ready" | "importing" | "imported";
 
-type AreaMapping = {
-  agentCode: string;
-  agentName: string;
-};
-
 type ImportedCase = {
   accountNo: string;
   customer: string;
@@ -20,51 +15,141 @@ type ImportedCase = {
   amount: number;
   pendingAmount: number;
   address: string;
+  resolvedArea: string;
 };
 
 type Agent = {
   id: number;
   name: string;
   agent_code: string | null;
+  area: string | null;
+  status: string | null;
 };
 
-const AREA_AGENT_MAP: Record<string, AreaMapping> = {
-  NEEMUC: {
-    agentCode: "SS025",
-    agentName: "Shultab Singh Panwar",
-  },
-  SAILAN: {
-    agentCode: "SS021",
-    agentName: "Rajesh",
-  },
-  MANASA: {
-    agentCode: "SS023",
-    agentName: "Rahul Kumar",
-  },
-  MANAWA: {
-    agentCode: "SS022",
-    agentName: "Babu Nagda",
-  },
+type AreaRule = {
+  area: string;
+  keywords: string[];
 };
+
+const AREA_RULES: AreaRule[] = [
+  {
+    area: "CRPF Neemuch",
+    keywords: ["CRPF NEEMUCH", "CRPF ROAD NEEMUCH", "CRPF ROAD"],
+  },
+  {
+    area: "Pustak Bajar Neemuch",
+    keywords: [
+      "PUSTAK BAJAR NEEMUCH",
+      "PUSTAK BAZAR NEEMUCH",
+      "PUSTAK BAJAR",
+      "PUSTAK BAZAR",
+    ],
+  },
+  {
+    area: "MEN DB Mandsaur",
+    keywords: [
+      "MEN DB MANDSAUR",
+      "DB MANDSAUR",
+      "DBMSUR",
+      "MEN DB",
+    ],
+  },
+  {
+    area: "Station Road Ratlam",
+    keywords: ["STATION ROAD RATLAM", "STATION ROAD"],
+  },
+  {
+    area: "Alkapuri Ratlam",
+    keywords: ["ALKAPURI RATLAM", "ALKAPURI"],
+  },
+  {
+    area: "College Road Ratlam",
+    keywords: ["COLLEGE ROAD RATLAM", "COLLEGE ROAD"],
+  },
+  {
+    area: "Chandni Chowk Ratlam",
+    keywords: [
+      "CHANDNI CHOWK RATLAM",
+      "CHANDNI CHAUK RATLAM",
+      "CHANDNI CHOWK",
+      "CHANDNI CHAUK",
+    ],
+  },
+  {
+    area: "Khachrod",
+    keywords: ["KHACHROD", "KHACHRAUD", "KHACHROD ROAD"],
+  },
+  {
+    area: "Bilpank",
+    keywords: ["BILPANK", "BILPAN", "BILPAAK"],
+  },
+  {
+    area: "Bamaniya",
+    keywords: ["BAMANIYA", "BAMANI"],
+  },
+  {
+    area: "Petlawad",
+    keywords: ["PETLAWAD", "PETLAWADA"],
+  },
+  {
+    area: "Dhar",
+    keywords: ["DHAAR", "DHAR"],
+  },
+  {
+    area: "Manavar",
+    keywords: ["MANAVAR", "MANAWAR", "MANAWA"],
+  },
+  {
+    area: "Tonki",
+    keywords: ["TONKI"],
+  },
+  {
+    area: "Jaora",
+    keywords: ["JAORA"],
+  },
+  {
+    area: "Sailana",
+    keywords: ["SAILANA", "SAILAN"],
+  },
+  {
+    area: "Manasa",
+    keywords: ["MANASA"],
+  },
+  {
+    area: "Mandsaur",
+    keywords: ["MANDSAUR", "MANDSA"],
+  },
+  {
+    area: "Neemuch",
+    keywords: [
+      "VIJAY NAGAR NEEMUCH",
+      "VJNEEM",
+      "NEEMUCH",
+      "NEEMUC",
+    ],
+  },
+];
 
 function BankImport() {
   const [bankName, setBankName] = useState("State Bank of India (SBI)");
   const [fileName, setFileName] = useState("");
   const [status, setStatus] = useState<ImportStatus>("idle");
   const [cases, setCases] = useState<ImportedCase[]>([]);
+  const [agents, setAgents] = useState<Agent[]>([]);
 
   const [importedCount, setImportedCount] = useState(0);
   const [skippedCount, setSkippedCount] = useState(0);
   const [unassignedCount, setUnassignedCount] = useState(0);
 
-  function normalizeText(value: unknown) {
-    return String(value ?? "").trim();
+  function normalize(value: unknown) {
+    return String(value ?? "")
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, "");
   }
 
   function normalizeHeader(value: string) {
-    return value
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, "");
+    return value.toLowerCase().replace(/[^a-z0-9]/g, "");
   }
 
   function getValue(
@@ -81,7 +166,7 @@ function BankImport() {
       );
 
       if (exactKey) {
-        return normalizeText(row[exactKey]);
+        return String(row[exactKey] ?? "").trim();
       }
     }
 
@@ -93,7 +178,7 @@ function BankImport() {
       );
 
       if (partialKey) {
-        return normalizeText(row[partialKey]);
+        return String(row[partialKey] ?? "").trim();
       }
     }
 
@@ -108,8 +193,46 @@ function BankImport() {
     return Number(cleaned) || 0;
   }
 
-  function normalizeAccountNo(value: string) {
-    return value.replace(/\s/g, "").toUpperCase();
+  function resolveArea(
+    alpha: string,
+    branch: string,
+    address: string
+  ) {
+    const combined = normalize(`${branch} ${address} ${alpha}`);
+
+    for (const rule of AREA_RULES) {
+      const matched = rule.keywords.some((keyword) =>
+        combined.includes(normalize(keyword))
+      );
+
+      if (matched) {
+        return rule.area;
+      }
+    }
+
+    return "";
+  }
+
+  function normalizeAgentArea(area: string | null) {
+    if (!area) return "";
+
+    const normalized = normalize(area);
+
+    for (const rule of AREA_RULES) {
+      if (normalize(rule.area) === normalized) {
+        return rule.area;
+      }
+
+      const matched = rule.keywords.some(
+        (keyword) => normalize(keyword) === normalized
+      );
+
+      if (matched) {
+        return rule.area;
+      }
+    }
+
+    return area.trim();
   }
 
   function makeCaseKey(item: {
@@ -118,7 +241,7 @@ function BankImport() {
     phone: string;
     bank: string;
   }) {
-    const accountNo = normalizeAccountNo(item.accountNo || "");
+    const accountNo = normalize(item.accountNo || "");
 
     if (accountNo) {
       return `ACCOUNT:${accountNo}`;
@@ -126,9 +249,9 @@ function BankImport() {
 
     return [
       "FALLBACK",
-      item.customer.trim().toLowerCase(),
-      item.phone.trim(),
-      item.bank.trim().toLowerCase(),
+      normalize(item.customer),
+      normalize(item.phone),
+      normalize(item.bank),
     ].join("|");
   }
 
@@ -136,7 +259,25 @@ function BankImport() {
     if (!remarks) return "";
 
     const match = remarks.match(/Account No:\s*([^|]+)/i);
-    return match ? normalizeAccountNo(match[1]) : "";
+
+    return match ? match[1].trim() : "";
+  }
+
+  async function loadActiveAgents() {
+    const { data, error } = await supabase
+      .from("agents")
+      .select("id, name, agent_code, area, status")
+      .eq("status", "Active")
+      .order("id", { ascending: true });
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    const activeAgents = (data || []) as Agent[];
+
+    setAgents(activeAgents);
+    return activeAgents;
   }
 
   async function loadAllExistingCases() {
@@ -171,7 +312,7 @@ function BankImport() {
     return allRows;
   }
 
-  function handleFile(event: ChangeEvent<HTMLInputElement>) {
+  async function handleFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
 
     if (!file) return;
@@ -182,6 +323,16 @@ function BankImport() {
     setSkippedCount(0);
     setUnassignedCount(0);
     setStatus("idle");
+
+    try {
+      await loadActiveAgents();
+    } catch (error) {
+      alert(
+        "Executive list error: " +
+          (error instanceof Error ? error.message : "Unknown error")
+      );
+      return;
+    }
 
     const reader = new FileReader();
 
@@ -261,6 +412,7 @@ function BankImport() {
               amount,
               pendingAmount: amount,
               address,
+              resolvedArea: resolveArea(alpha, branch, address),
             };
           })
           .filter(
@@ -287,9 +439,7 @@ function BankImport() {
         setStatus("ready");
 
         if (readyCases.length === 0) {
-          alert(
-            "Excel read hui, lekin valid bank cases nahi mile."
-          );
+          alert("Excel read hui, lekin valid cases nahi mile.");
         }
       } catch {
         setStatus("idle");
@@ -301,31 +451,43 @@ function BankImport() {
   }
 
   const areaSummary = useMemo(() => {
-    const summary = new Map<string, number>();
+    const summary = new Map<string, ImportedCase[]>();
 
     cases.forEach((item) => {
-      const area = item.alpha || "NO AREA";
-      summary.set(area, (summary.get(area) || 0) + 1);
+      const area = item.resolvedArea || "Unmatched Area";
+      const oldCases = summary.get(area) || [];
+
+      oldCases.push(item);
+      summary.set(area, oldCases);
     });
 
     return Array.from(summary.entries())
-      .map(([area, count]) => ({
-        area,
-        count,
-        mapping: AREA_AGENT_MAP[area],
-      }))
-      .sort((a, b) => b.count - a.count);
-  }, [cases]);
+      .map(([area, areaCases]) => {
+        const areaAgents = agents.filter(
+          (agent) => normalizeAgentArea(agent.area) === area
+        );
 
-  const mappedPreviewCount = useMemo(
+        return {
+          area,
+          totalCases: areaCases.length,
+          agents: areaAgents,
+        };
+      })
+      .sort((a, b) => b.totalCases - a.totalCases);
+  }, [cases, agents]);
+
+  const autoAssignedPreviewCount = useMemo(
     () =>
-      cases.filter((item) => Boolean(AREA_AGENT_MAP[item.alpha]))
-        .length,
-    [cases]
+      areaSummary.reduce(
+        (total, item) =>
+          total + (item.agents.length > 0 ? item.totalCases : 0),
+        0
+      ),
+    [areaSummary]
   );
 
-  const unmappedPreviewCount =
-    cases.length - mappedPreviewCount;
+  const unassignedPreviewCount =
+    cases.length - autoAssignedPreviewCount;
 
   async function refreshAgentCaseCounts(agentIds: number[]) {
     const uniqueAgentIds = Array.from(new Set(agentIds));
@@ -354,66 +516,51 @@ function BankImport() {
       return;
     }
 
-    const confirmImport = window.confirm(
+    const confirmed = window.confirm(
       [
         "Area-wise automatic case assignment",
         "",
         `Total unique cases: ${cases.length}`,
-        `Mapped cases: ${mappedPreviewCount}`,
-        `Unmapped cases: ${unmappedPreviewCount}`,
+        `Auto assigned preview: ${autoAssignedPreviewCount}`,
+        `Unassigned preview: ${unassignedPreviewCount}`,
         "",
-        "Mapped cases correct executives ko assign honge.",
-        "Unmapped areas ke cases safe Unassigned rahenge.",
-        "Existing duplicate accounts skip honge.",
+        "Same area ke active agents ke beech cases equal distribute honge.",
+        "Jis area me active agent nahi hai, cases Unassigned rahenge.",
+        "Existing duplicate account numbers skip honge.",
         "",
         "Import continue karein?",
       ].join("\n")
     );
 
-    if (!confirmImport) return;
+    if (!confirmed) return;
 
     setStatus("importing");
     setImportedCount(0);
     setSkippedCount(0);
     setUnassignedCount(0);
 
-    const { data: agentsData, error: agentsError } =
-      await supabase
-        .from("agents")
-        .select("id, name, agent_code")
-        .eq("status", "Active");
+    let activeAgents: Agent[];
 
-    if (agentsError) {
+    try {
+      activeAgents = await loadActiveAgents();
+    } catch (error) {
       alert(
-        "Executive list load error: " + agentsError.message
+        "Executive list error: " +
+          (error instanceof Error ? error.message : "Unknown error")
       );
       setStatus("ready");
       return;
     }
-
-    const agents = (agentsData || []) as Agent[];
-
-    const agentsByCode = new Map<string, Agent>();
-
-    agents.forEach((agent) => {
-      const code = String(agent.agent_code || "")
-        .trim()
-        .toUpperCase();
-
-      if (code) agentsByCode.set(code, agent);
-    });
 
     let existingData;
 
     try {
       existingData = await loadAllExistingCases();
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Unknown database error";
-
-      alert("Existing cases check error: " + message);
+      alert(
+        "Existing cases error: " +
+          (error instanceof Error ? error.message : "Unknown error")
+      );
       setStatus("ready");
       return;
     }
@@ -421,11 +568,9 @@ function BankImport() {
     const existingKeys = new Set<string>();
 
     existingData.forEach((item) => {
-      const accountNo = extractAccountNo(item.remarks);
-
       existingKeys.add(
         makeCaseKey({
-          accountNo,
+          accountNo: extractAccountNo(item.remarks),
           customer: item.customer_name || "",
           phone: item.mobile || "",
           bank: item.bank_name || "",
@@ -444,45 +589,47 @@ function BankImport() {
       setStatus("imported");
 
       alert(
-        [
-          "Import complete.",
-          "",
-          "New imported: 0",
-          `Skipped duplicates: ${skipped}`,
-          "",
-          "Sab accounts pehle se database me hain.",
-        ].join("\n")
+        `New imported: 0\nSkipped duplicates: ${skipped}`
       );
 
       return;
     }
 
-    let unassigned = 0;
+    const areaRoundRobin = new Map<string, number>();
     const assignedAgentIds: number[] = [];
+    let unassigned = 0;
 
     const rowsToInsert = newCases.map((item) => {
-      const mapping = AREA_AGENT_MAP[item.alpha];
+      const matchingAgents = activeAgents.filter(
+        (agent) =>
+          normalizeAgentArea(agent.area) === item.resolvedArea
+      );
 
-      const mappedAgent = mapping
-        ? agentsByCode.get(mapping.agentCode.toUpperCase())
-        : undefined;
+      let selectedAgent: Agent | undefined;
 
-      if (!mappedAgent) {
-        unassigned += 1;
+      if (matchingAgents.length > 0) {
+        const currentIndex =
+          areaRoundRobin.get(item.resolvedArea) || 0;
+
+        selectedAgent =
+          matchingAgents[currentIndex % matchingAgents.length];
+
+        areaRoundRobin.set(
+          item.resolvedArea,
+          currentIndex + 1
+        );
+
+        assignedAgentIds.push(selectedAgent.id);
       } else {
-        assignedAgentIds.push(mappedAgent.id);
+        unassigned += 1;
       }
 
-      const assignmentText = mappedAgent
-        ? `${mappedAgent.agent_code || mapping?.agentCode} - ${
-            mappedAgent.name
-          }`
+      const assignedText = selectedAgent
+        ? `${selectedAgent.agent_code || ""} - ${selectedAgent.name}`
         : "Unassigned";
 
       return {
-        customer_name:
-          item.customer || "Unknown Customer",
-
+        customer_name: item.customer || "Unknown Customer",
         mobile: item.phone,
 
         bank_name: item.branch
@@ -490,25 +637,21 @@ function BankImport() {
           : bankName,
 
         loan_type: item.loanType,
-
         loan_amount: item.amount,
-
-        pending_amount:
-          item.pendingAmount || item.amount,
-
+        pending_amount: item.pendingAmount || item.amount,
         address: item.address,
-
         status: "Pending",
 
-        assigned_agent: mappedAgent
-          ? mappedAgent.id
+        assigned_agent: selectedAgent
+          ? selectedAgent.id
           : null,
 
         remarks: [
           `Account No: ${item.accountNo || "Not Available"}`,
           `Alpha: ${item.alpha || "Not Available"}`,
           `Branch: ${item.branch || "Not Available"}`,
-          `Auto Assignment: ${assignmentText}`,
+          `Resolved Area: ${item.resolvedArea || "Unmatched"}`,
+          `Area Assignment: ${assignedText}`,
           `Source File: ${fileName}`,
         ].join(" | "),
       };
@@ -540,12 +683,11 @@ function BankImport() {
         alert(
           [
             "Import stopped.",
-            "",
-            `Successfully imported before error: ${totalImported}`,
+            `Imported before error: ${totalImported}`,
             `Error: ${error.message}`,
             "",
             "Same file dobara upload kar sakte ho.",
-            "Already imported account numbers automatically skip honge.",
+            "Imported account numbers automatically skip honge.",
           ].join("\n")
         );
 
@@ -567,9 +709,7 @@ function BankImport() {
         "",
         `Imported: ${totalImported}`,
         `Skipped duplicates: ${skipped}`,
-        `Assigned automatically: ${
-          totalImported - unassigned
-        }`,
+        `Auto assigned: ${totalImported - unassigned}`,
         `Unassigned: ${unassigned}`,
       ].join("\n")
     );
@@ -577,12 +717,11 @@ function BankImport() {
 
   return (
     <div className="module-card">
-      <h1>📄 Bank Excel Auto Assignment</h1>
+      <h1>📄 Bank Excel Area-wise Auto Assignment</h1>
 
       <p>
-        Ek hi bank Excel upload karo. System Alpha area ke
-        hisaab se cases automatically correct executive ko
-        assign karega.
+        Complete bank Excel upload karo. Cases executive ke Working Area
+        ke hisaab se automatically aur equally distribute honge.
       </p>
 
       <hr />
@@ -591,9 +730,7 @@ function BankImport() {
 
       <select
         value={bankName}
-        onChange={(event) =>
-          setBankName(event.target.value)
-        }
+        onChange={(event) => setBankName(event.target.value)}
       >
         <option>State Bank of India (SBI)</option>
         <option>Bank of Baroda (BOB)</option>
@@ -614,77 +751,66 @@ function BankImport() {
         <div className="card">
           <h3>Selected File</h3>
 
-          <p>
-            <strong>Bank:</strong> {bankName}
-          </p>
-
-          <p>
-            <strong>File:</strong> {fileName}
-          </p>
-
-          <p>
-            <strong>Status:</strong> {status}
-          </p>
-
-          <p>
-            <strong>Unique Cases Ready:</strong>{" "}
-            {cases.length}
-          </p>
+          <p><strong>Bank:</strong> {bankName}</p>
+          <p><strong>File:</strong> {fileName}</p>
+          <p><strong>Status:</strong> {status}</p>
+          <p><strong>Unique Cases:</strong> {cases.length}</p>
 
           <p>
             <strong>Auto Assigned Preview:</strong>{" "}
-            {mappedPreviewCount}
+            {autoAssignedPreviewCount}
           </p>
 
           <p>
-            <strong>Unmapped / Unassigned:</strong>{" "}
-            {unmappedPreviewCount}
+            <strong>Unassigned Preview:</strong>{" "}
+            {unassignedPreviewCount}
           </p>
 
-          {cases.length > 0 &&
-            status !== "importing" && (
-              <button
-                className="primary-btn"
-                onClick={importCases}
-              >
-                Auto Assign & Import {cases.length} Cases
-              </button>
-            )}
+          {cases.length > 0 && status !== "importing" && (
+            <button
+              className="primary-btn"
+              onClick={importCases}
+            >
+              Auto Assign & Import {cases.length} Cases
+            </button>
+          )}
         </div>
       )}
 
       {areaSummary.length > 0 && (
         <div className="card">
-          <h3>Area-wise Assignment Preview</h3>
+          <h3>Area-wise Distribution Preview</h3>
 
           <table>
             <thead>
               <tr>
-                <th>Alpha Area</th>
+                <th>Resolved Area</th>
                 <th>Total Cases</th>
-                <th>Assigned Agent</th>
-                <th>Import Status</th>
+                <th>Active Executives</th>
+                <th>Distribution</th>
               </tr>
             </thead>
 
             <tbody>
               {areaSummary.map((item) => (
                 <tr key={item.area}>
+                  <td><strong>{item.area}</strong></td>
+                  <td>{item.totalCases}</td>
+
                   <td>
-                    <strong>{item.area}</strong>
+                    {item.agents.length > 0
+                      ? item.agents
+                          .map(
+                            (agent) =>
+                              `${agent.agent_code || ""} ${agent.name}`
+                          )
+                          .join(", ")
+                      : "No Active Executive"}
                   </td>
 
-                  <td>{item.count}</td>
-
                   <td>
-                    {item.mapping
-                      ? `${item.mapping.agentCode} - ${item.mapping.agentName}`
-                      : "No Agent Mapping"}
-                  </td>
-
-                  <td>
-                    {item.mapping
-                      ? "✅ Auto Assign"
+                    {item.agents.length > 0
+                      ? `✅ Equal between ${item.agents.length} agent(s)`
                       : "⚠️ Unassigned"}
                   </td>
                 </tr>
@@ -696,95 +822,56 @@ function BankImport() {
 
       {cases.length > 0 && (
         <div className="card">
-          <h3>Bank Cases Preview</h3>
+          <h3>First 20 Cases Preview</h3>
 
           <table>
             <thead>
               <tr>
                 <th>Account No.</th>
                 <th>Customer</th>
-                <th>Mobile</th>
                 <th>Alpha</th>
                 <th>Branch</th>
+                <th>Resolved Area</th>
                 <th>Balance</th>
-                <th>Target Agent</th>
               </tr>
             </thead>
 
             <tbody>
-              {cases.slice(0, 20).map((item, index) => {
-                const mapping =
-                  AREA_AGENT_MAP[item.alpha];
-
-                return (
-                  <tr
-                    key={`${item.accountNo}-${index}`}
-                  >
-                    <td>{item.accountNo}</td>
-                    <td>{item.customer}</td>
-                    <td>{item.phone}</td>
-                    <td>{item.alpha}</td>
-                    <td>{item.branch}</td>
-                    <td>
-                      ₹
-                      {item.amount.toLocaleString(
-                        "en-IN"
-                      )}
-                    </td>
-                    <td>
-                      {mapping
-                        ? `${mapping.agentCode} - ${mapping.agentName}`
-                        : "Unassigned"}
-                    </td>
-                  </tr>
-                );
-              })}
+              {cases.slice(0, 20).map((item, index) => (
+                <tr key={`${item.accountNo}-${index}`}>
+                  <td>{item.accountNo}</td>
+                  <td>{item.customer}</td>
+                  <td>{item.alpha}</td>
+                  <td>{item.branch}</td>
+                  <td>{item.resolvedArea || "Unmatched"}</td>
+                  <td>
+                    ₹{item.amount.toLocaleString("en-IN")}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
-
-          <p>
-            First 20 cases shown. Total unique cases:{" "}
-            {cases.length}
-          </p>
         </div>
       )}
 
       {status === "importing" && (
         <div className="card">
-          <h3>⏳ Area-wise cases importing...</h3>
-
-          <p>
-            Imported so far: {importedCount}
-          </p>
-
-          <p>
-            Skipped duplicates: {skippedCount}
-          </p>
-
-          <p>
-            Unassigned cases: {unassignedCount}
-          </p>
+          <h3>⏳ Importing cases...</h3>
+          <p>Imported so far: {importedCount}</p>
+          <p>Skipped duplicates: {skippedCount}</p>
+          <p>Unassigned: {unassignedCount}</p>
         </div>
       )}
 
       {status === "imported" && (
         <div className="card">
           <h3>✅ Import Complete</h3>
-
           <p>Imported: {importedCount}</p>
-
+          <p>Skipped duplicates: {skippedCount}</p>
           <p>
-            Skipped duplicates: {skippedCount}
+            Auto assigned: {importedCount - unassignedCount}
           </p>
-
-          <p>
-            Auto assigned:{" "}
-            {importedCount - unassignedCount}
-          </p>
-
-          <p>
-            Unassigned: {unassignedCount}
-          </p>
+          <p>Unassigned: {unassignedCount}</p>
         </div>
       )}
     </div>
