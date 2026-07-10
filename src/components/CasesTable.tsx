@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "../supabaseClient";
 import CaseActions from "./CaseActions";
 
@@ -28,9 +28,9 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
   const [search, setSearch] = useState("");
   const [localCases, setLocalCases] = useState<CaseItem[]>(cases);
   const [executives, setExecutives] = useState<Executive[]>([]);
-  const [selectedAgents, setSelectedAgents] = useState<
-    Record<number, string>
-  >({});
+  const [selectedAgents, setSelectedAgents] = useState<Record<number, string>>(
+    {}
+  );
 
   useEffect(() => {
     setLocalCases(cases);
@@ -44,6 +44,7 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
     const { data, error } = await supabase
       .from("agents")
       .select("id, name, agent_code")
+      .eq("status", "Active")
       .order("id", { ascending: true });
 
     if (error) {
@@ -61,69 +62,27 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
     return `${code} - ${agent.name}`;
   }
 
-  function getAgent(item: CaseItem) {
+  function getAgentName(item: CaseItem) {
     const assignedId = Number(item.assigned_agent);
 
-    return executives.find((executive) => executive.id === assignedId);
-  }
-
-  function getAgentName(item: CaseItem) {
-    const matched = getAgent(item);
-
-    if (matched) return formatAgent(matched);
-
-    return item.agent || "Unassigned Cases";
-  }
-
-  const filteredCases = useMemo(() => {
-    const value = search.trim().toLowerCase();
-
-    if (!value) return localCases;
-
-    return localCases.filter((item) =>
-      `${item.id} ${item.customer} ${item.phone} ${item.bank} ${getAgentName(
-        item
-      )} ${item.status}`
-        .toLowerCase()
-        .includes(value)
+    const matched = executives.find(
+      (executive) => executive.id === assignedId
     );
-  }, [localCases, search, executives]);
 
-  const groupedCases = useMemo(() => {
-    const groups = new Map<
-      string,
-      {
-        executiveId: number | null;
-        executiveName: string;
-        items: CaseItem[];
-      }
-    >();
+    if (matched) {
+      return formatAgent(matched);
+    }
 
-    filteredCases.forEach((item) => {
-      const executive = getAgent(item);
+    return item.agent || "Unassigned";
+  }
 
-      const key = executive ? String(executive.id) : "unassigned";
-
-      if (!groups.has(key)) {
-        groups.set(key, {
-          executiveId: executive?.id || null,
-          executiveName: executive
-            ? formatAgent(executive)
-            : "Unassigned Cases",
-          items: [],
-        });
-      }
-
-      groups.get(key)?.items.push(item);
-    });
-
-    return Array.from(groups.values()).sort((a, b) => {
-      if (a.executiveId === null) return 1;
-      if (b.executiveId === null) return -1;
-
-      return a.executiveName.localeCompare(b.executiveName);
-    });
-  }, [filteredCases, executives]);
+  const filteredCases = localCases.filter((item) =>
+    `${item.id} ${item.customer} ${item.phone} ${item.bank} ${getAgentName(
+      item
+    )} ${item.status}`
+      .toLowerCase()
+      .includes(search.toLowerCase())
+  );
 
   async function assignExecutive(caseId: number) {
     const selectedId = selectedAgents[caseId];
@@ -200,14 +159,10 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
 
   return (
     <div className="cases-panel">
-      <h2>Executive-wise Recovery Cases</h2>
-
-      <p>
-        Har executive ke assigned cases uske naam ke neeche dikh rahe hain.
-      </p>
+      <h2>Recovery Cases</h2>
 
       <input
-        placeholder="Search case, customer, phone, bank or executive..."
+        placeholder="Search case, customer, phone, bank, executive..."
         value={search}
         onChange={(event) => setSearch(event.target.value)}
       />
@@ -215,103 +170,72 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
       <br />
       <br />
 
-      {groupedCases.length === 0 && (
-        <div className="module-card">
-          <h3>No Recovery Cases Found</h3>
-        </div>
-      )}
+      <div className="table-box">
+        <table>
+          <thead>
+            <tr>
+              <th>Case ID</th>
+              <th>Customer</th>
+              <th>Phone</th>
+              <th>Bank</th>
+              <th>Amount</th>
+              <th>Assigned Executive</th>
+              <th>Assign / Reassign</th>
+              <th>Status</th>
+              <th>Action</th>
+            </tr>
+          </thead>
 
-      {groupedCases.map((group) => (
-        <div
-          className="module-card"
-          key={group.executiveId ?? "unassigned"}
-          style={{ marginBottom: "24px" }}
-        >
-          <h2>
-            👨‍💼 {group.executiveName}
-            {" — "}
-            {group.items.length} Cases
-          </h2>
+          <tbody>
+            {filteredCases.map((item) => (
+              <tr key={item.id}>
+                <td>{item.id}</td>
+                <td>{item.customer}</td>
+                <td>{item.phone}</td>
+                <td>{item.bank}</td>
+                <td>₹{item.amount.toLocaleString("en-IN")}</td>
+                <td>{getAgentName(item)}</td>
 
-          <div className="table-box">
-            <table>
-              <thead>
-                <tr>
-                  <th>Case ID</th>
-                  <th>Customer</th>
-                  <th>Phone</th>
-                  <th>Bank / Branch</th>
-                  <th>Amount</th>
-                  <th>Assign / Reassign</th>
-                  <th>Status</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
+                <td>
+                  <select
+                    value={selectedAgents[item.id] || ""}
+                    onChange={(event) =>
+                      setSelectedAgents((old) => ({
+                        ...old,
+                        [item.id]: event.target.value,
+                      }))
+                    }
+                  >
+                    <option value="">Select Executive</option>
 
-              <tbody>
-                {group.items.map((item) => (
-                  <tr key={item.id}>
-                    <td>{item.id}</td>
-                    <td>{item.customer}</td>
-                    <td>{item.phone}</td>
-                    <td>{item.bank}</td>
-                    <td>
-                      ₹{item.amount.toLocaleString("en-IN")}
-                    </td>
+                    {executives.map((executive) => (
+                      <option key={executive.id} value={executive.id}>
+                        {formatAgent(executive)}
+                      </option>
+                    ))}
+                  </select>
+                </td>
 
-                    <td>
-                      <select
-                        value={selectedAgents[item.id] || ""}
-                        onChange={(event) =>
-                          setSelectedAgents((old) => ({
-                            ...old,
-                            [item.id]: event.target.value,
-                          }))
-                        }
-                      >
-                        <option value="">Select Executive</option>
+                <td>
+                  <span className={`status ${item.status.toLowerCase()}`}>
+                    {item.status}
+                  </span>
+                </td>
 
-                        {executives.map((executive) => (
-                          <option
-                            key={executive.id}
-                            value={executive.id}
-                          >
-                            {formatAgent(executive)}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-
-                    <td>
-                      <span
-                        className={`status ${item.status.toLowerCase()}`}
-                      >
-                        {item.status}
-                      </span>
-                    </td>
-
-                    <td>
-                      <CaseActions
-                        onAssign={() => assignExecutive(item.id)}
-                        onVisit={() =>
-                          updateStatus(item.id, "Visited")
-                        }
-                        onPayment={() =>
-                          updateStatus(item.id, "Paid")
-                        }
-                        onEdit={() =>
-                          updateStatus(item.id, "Overdue")
-                        }
-                        onDelete={() => onDeleteCase(item.id)}
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ))}
+                <td>
+                  <CaseActions
+                    onAssign={() => assignExecutive(item.id)}
+                    onVisit={() => updateStatus(item.id, "Visited")}
+                    onPayment={() => updateStatus(item.id, "Paid")}
+                    onEdit={() => updateStatus(item.id, "Overdue")}
+                    onDelete={() => onDeleteCase(item.id)}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
