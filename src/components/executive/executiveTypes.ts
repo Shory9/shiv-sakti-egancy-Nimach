@@ -6,6 +6,9 @@ export type Executive = {
   vehicle?: string;
   status?: string;
   cases?: number;
+  agent_code?: string | null;
+  is_online?: boolean | null;
+  last_seen?: string | null;
 };
 
 export type MyCase = {
@@ -14,7 +17,16 @@ export type MyCase = {
   phone: string;
   bank: string;
   amount: number;
-  assigned_agent?: string;
+  pendingAmount: number;
+  address: string;
+  accountNo: string;
+  branchName: string;
+  schemeCode: string;
+  accountSegment: string;
+  assetClassification: string;
+  sanctionLimit: number;
+  customerBalance: number;
+  assigned_agent?: number | string | null;
   status: "Pending" | "Visited" | "Paid" | "Overdue";
 };
 

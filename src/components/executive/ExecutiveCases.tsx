@@ -1,10 +1,13 @@
 import {
   type ChangeEvent,
+  type Dispatch,
+  type SetStateAction,
   useMemo,
   useState,
 } from "react";
 
 import { supabase } from "../../supabaseClient";
+
 import type {
   Executive,
   MyCase,
@@ -13,11 +16,15 @@ import type {
 type Props = {
   executive: Executive;
   myCases: MyCase[];
-  setMyCases: React.Dispatch<
-    React.SetStateAction<MyCase[]>
-  >;
+  setMyCases: Dispatch<SetStateAction<MyCase[]>>;
   reloadVisits: () => void;
 };
+
+function formatMoney(value: number) {
+  return Number(value || 0).toLocaleString("en-IN", {
+    maximumFractionDigits: 2,
+  });
+}
 
 function ExecutiveCases({
   executive,
@@ -41,9 +48,21 @@ function ExecutiveCases({
     if (!value) return myCases;
 
     return myCases.filter((item) =>
-      `${item.id} ${item.customer} ${item.phone} ${
-        item.bank
-      } ${item.status} ${executive.area}`
+      [
+        item.id,
+        item.customer,
+        item.phone,
+        item.bank,
+        item.status,
+        item.address,
+        item.accountNo,
+        item.branchName,
+        item.schemeCode,
+        item.accountSegment,
+        item.assetClassification,
+        executive.area,
+      ]
+        .join(" ")
         .toLowerCase()
         .includes(value)
     );
@@ -102,10 +121,20 @@ function ExecutiveCases({
         }
 
         if (status === "Checked Out") {
-          await supabase
+          const { error: caseError } = await supabase
             .from("cases")
-            .update({ status: "Visited" })
+            .update({
+              status: "Visited",
+            })
             .eq("id", item.id);
+
+          if (caseError) {
+            alert(
+              "Case status update error: " +
+                caseError.message
+            );
+            return;
+          }
 
           setMyCases((old) =>
             old.map((caseItem) =>
@@ -150,7 +179,7 @@ function ExecutiveCases({
       <div className="exec-card">
         <input
           className="exec-input"
-          placeholder="🔍 Search name, phone, case ID, bank or status..."
+          placeholder="🔍 Search name, phone, account, branch, DB category..."
           value={search}
           onChange={(event) =>
             setSearch(event.target.value)
@@ -165,51 +194,120 @@ function ExecutiveCases({
       )}
 
       {filteredCases.map((item) => (
-        <div className="exec-card" key={item.id}>
+        <div
+          className="exec-card"
+          key={item.id}
+        >
+          <div className="exec-case-heading">
+            <div>
+              <p>
+                <strong>Case ID:</strong> #{item.id}
+              </p>
+
+              <h3>
+                {item.customer || "Unknown Customer"}
+              </h3>
+            </div>
+
+            <span
+              className={`status ${item.status.toLowerCase()}`}
+            >
+              {item.status}
+            </span>
+          </div>
+
           <p>
-            <strong>Case ID:</strong> #{item.id}
+            <strong>📍 Address:</strong>{" "}
+            {item.address || "Address not available"}
           </p>
 
-          <h3>{item.customer}</h3>
-
-          <p>📞 {item.phone || "No phone"}</p>
-          <p>🏦 {item.bank || "No bank"}</p>
+          <p>
+            <strong>📞 Mobile:</strong>{" "}
+            {item.phone || "No phone"}
+          </p>
 
           <p>
-            💰 ₹
-            {Number(item.amount || 0).toLocaleString(
-              "en-IN"
+            <strong>🏦 Branch:</strong>{" "}
+            {item.branchName ||
+              item.bank ||
+              "No branch"}
+          </p>
+
+          <p>
+            <strong>🆔 Account:</strong>{" "}
+            {item.accountNo || "Not available"}
+          </p>
+
+          <p>
+            <strong>📑 Scheme:</strong>{" "}
+            {item.schemeCode || "Not available"}
+          </p>
+
+          <p>
+            <strong>📂 Segment:</strong>{" "}
+            {item.accountSegment || "Not available"}
+          </p>
+
+          <p>
+            <strong>🔴 Category:</strong>{" "}
+            {item.assetClassification ||
+              "Not available"}
+          </p>
+
+          <hr />
+
+          <p>
+            <strong>💰 Outstanding:</strong>{" "}
+            ₹{formatMoney(item.amount)}
+          </p>
+
+          <p>
+            <strong>⏳ Pending:</strong>{" "}
+            ₹{formatMoney(item.pendingAmount)}
+          </p>
+
+          <p>
+            <strong>🏦 Sanction Limit:</strong>{" "}
+            ₹{formatMoney(item.sanctionLimit)}
+          </p>
+
+          <p>
+            <strong>💳 Customer Balance:</strong>{" "}
+            ₹{formatMoney(item.customerBalance)}
+          </p>
+
+          <p>
+            <strong>🗺 Working Area:</strong>{" "}
+            {executive.area || "Not set"}
+          </p>
+
+          <div className="exec-action-row">
+            {item.phone && (
+              <a href={`tel:${item.phone}`}>
+                <button className="exec-primary-btn">
+                  ☎ Call
+                </button>
+              </a>
             )}
-          </p>
 
-          <p>📍 {executive.area}</p>
-          <p>📌 {item.status}</p>
+            <button
+              className="exec-primary-btn"
+              onClick={() =>
+                saveVisit(item, "Checked In")
+              }
+            >
+              📍 Check In
+            </button>
 
-          {item.phone && (
-            <a href={`tel:${item.phone}`}>
-              <button className="exec-primary-btn">
-                ☎ Call
-              </button>
-            </a>
-          )}{" "}
-
-          <button
-            className="exec-primary-btn"
-            onClick={() =>
-              saveVisit(item, "Checked In")
-            }
-          >
-            📍 Check In
-          </button>{" "}
-
-          <button
-            className="exec-danger-btn"
-            onClick={() =>
-              saveVisit(item, "Checked Out")
-            }
-          >
-            ⏹ Check Out
-          </button>
+            <button
+              className="exec-danger-btn"
+              onClick={() =>
+                saveVisit(item, "Checked Out")
+              }
+            >
+              ⏹ Check Out
+            </button>
+          </div>
 
           <input
             className="exec-input"
