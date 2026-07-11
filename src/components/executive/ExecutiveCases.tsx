@@ -1,46 +1,100 @@
-import { type ChangeEvent, useState } from "react";
+import {
+  type ChangeEvent,
+  useMemo,
+  useState,
+} from "react";
+
 import { supabase } from "../../supabaseClient";
-import type { Executive, MyCase } from "./executiveTypes";
+import type {
+  Executive,
+  MyCase,
+} from "./executiveTypes";
 
 type Props = {
   executive: Executive;
   myCases: MyCase[];
-  setMyCases: React.Dispatch<React.SetStateAction<MyCase[]>>;
+  setMyCases: React.Dispatch<
+    React.SetStateAction<MyCase[]>
+  >;
   reloadVisits: () => void;
 };
 
-function ExecutiveCases({ executive, myCases, setMyCases, reloadVisits }: Props) {
-  const [remarks, setRemarks] = useState<Record<number, string>>({});
-  const [photos, setPhotos] = useState<Record<number, string>>({});
+function ExecutiveCases({
+  executive,
+  myCases,
+  setMyCases,
+  reloadVisits,
+}: Props) {
+  const [search, setSearch] = useState("");
 
-  function handlePhoto(caseId: number, e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
+  const [remarks, setRemarks] = useState<
+    Record<number, string>
+  >({});
+
+  const [photos, setPhotos] = useState<
+    Record<number, string>
+  >({});
+
+  const filteredCases = useMemo(() => {
+    const value = search.trim().toLowerCase();
+
+    if (!value) return myCases;
+
+    return myCases.filter((item) =>
+      `${item.id} ${item.customer} ${item.phone} ${
+        item.bank
+      } ${item.status} ${executive.area}`
+        .toLowerCase()
+        .includes(value)
+    );
+  }, [myCases, search, executive.area]);
+
+  function handlePhoto(
+    caseId: number,
+    event: ChangeEvent<HTMLInputElement>
+  ) {
+    const file = event.target.files?.[0];
+
     if (!file) return;
 
     const reader = new FileReader();
+
     reader.onload = () => {
-      setPhotos((old) => ({ ...old, [caseId]: String(reader.result) }));
+      setPhotos((old) => ({
+        ...old,
+        [caseId]: String(reader.result),
+      }));
     };
+
     reader.readAsDataURL(file);
   }
 
-  function saveVisit(item: MyCase, status: "Checked In" | "Checked Out") {
+  function saveVisit(
+    item: MyCase,
+    status: "Checked In" | "Checked Out"
+  ) {
+    if (!navigator.geolocation) {
+      alert("GPS is device me supported nahi hai.");
+      return;
+    }
+
     navigator.geolocation.getCurrentPosition(
       async (position) => {
-        const latitude = position.coords.latitude.toFixed(6);
-        const longitude = position.coords.longitude.toFixed(6);
-
-        const { error } = await supabase.from("gps_visits").insert({
-          executive: executive.name,
-          customer: item.customer,
-          area: executive.area,
-          status,
-          latitude,
-          longitude,
-          remarks: remarks[item.id] || "",
-          photo: photos[item.id] || "",
-          time: new Date().toLocaleString("en-IN"),
-        });
+        const { error } = await supabase
+          .from("gps_visits")
+          .insert({
+            executive: executive.name,
+            customer: item.customer,
+            area: executive.area,
+            status,
+            latitude:
+              position.coords.latitude.toFixed(6),
+            longitude:
+              position.coords.longitude.toFixed(6),
+            remarks: remarks[item.id] || "",
+            photo: photos[item.id] || "",
+            time: new Date().toLocaleString("en-IN"),
+          });
 
         if (error) {
           alert("GPS save error: " + error.message);
@@ -54,27 +108,30 @@ function ExecutiveCases({ executive, myCases, setMyCases, reloadVisits }: Props)
             .eq("id", item.id);
 
           setMyCases((old) =>
-            old.map((c) =>
-              c.id === item.id ? { ...c, status: "Visited" } : c
+            old.map((caseItem) =>
+              caseItem.id === item.id
+                ? {
+                    ...caseItem,
+                    status: "Visited",
+                  }
+                : caseItem
             )
           );
         }
 
         reloadVisits();
 
-        alert(
-          `${status} saved successfully.\nLocation:\n${latitude}, ${longitude}`
-        );
+        alert(`${status} saved successfully.`);
       },
       (error) => {
         alert(
-          "Location permission allow karo.\nGPS ON rakho.\nError: " +
+          "Location permission allow karo. GPS Error: " +
             error.message
         );
       },
       {
         enableHighAccuracy: true,
-        timeout: 15000,
+        timeout: 20000,
         maximumAge: 0,
       }
     );
@@ -83,36 +140,73 @@ function ExecutiveCases({ executive, myCases, setMyCases, reloadVisits }: Props)
   return (
     <>
       <div className="exec-title">
-        <h2>📋 My Cases</h2>
-        <p>{myCases.length} assigned cases</p>
+        <h2>📋 Assigned Recovery Cases</h2>
+
+        <p>
+          {filteredCases.length} of {myCases.length} cases
+        </p>
       </div>
 
-      {myCases.length === 0 && (
-        <div className="exec-card">No assigned cases found.</div>
+      <div className="exec-card">
+        <input
+          className="exec-input"
+          placeholder="🔍 Search name, phone, case ID, bank or status..."
+          value={search}
+          onChange={(event) =>
+            setSearch(event.target.value)
+          }
+        />
+      </div>
+
+      {filteredCases.length === 0 && (
+        <div className="exec-card">
+          No matching assigned cases found.
+        </div>
       )}
 
-      {myCases.map((item) => (
+      {filteredCases.map((item) => (
         <div className="exec-card" key={item.id}>
+          <p>
+            <strong>Case ID:</strong> #{item.id}
+          </p>
+
           <h3>{item.customer}</h3>
-          <p>📞 {item.phone}</p>
-          <p>🏦 {item.bank}</p>
-          <p>💰 ₹{item.amount.toLocaleString("en-IN")}</p>
+
+          <p>📞 {item.phone || "No phone"}</p>
+          <p>🏦 {item.bank || "No bank"}</p>
+
+          <p>
+            💰 ₹
+            {Number(item.amount || 0).toLocaleString(
+              "en-IN"
+            )}
+          </p>
+
+          <p>📍 {executive.area}</p>
           <p>📌 {item.status}</p>
 
-          <a href={`tel:${item.phone}`}>
-            <button className="exec-primary-btn">☎ Call</button>
-          </a>{" "}
+          {item.phone && (
+            <a href={`tel:${item.phone}`}>
+              <button className="exec-primary-btn">
+                ☎ Call
+              </button>
+            </a>
+          )}{" "}
 
           <button
             className="exec-primary-btn"
-            onClick={() => saveVisit(item, "Checked In")}
+            onClick={() =>
+              saveVisit(item, "Checked In")
+            }
           >
             📍 Check In
           </button>{" "}
 
           <button
             className="exec-danger-btn"
-            onClick={() => saveVisit(item, "Checked Out")}
+            onClick={() =>
+              saveVisit(item, "Checked Out")
+            }
           >
             ⏹ Check Out
           </button>
@@ -121,23 +215,30 @@ function ExecutiveCases({ executive, myCases, setMyCases, reloadVisits }: Props)
             className="exec-input"
             type="file"
             accept="image/*"
-            onChange={(e) => handlePhoto(item.id, e)}
+            capture="environment"
+            onChange={(event) =>
+              handlePhoto(item.id, event)
+            }
           />
 
           <input
             className="exec-input"
             placeholder="Visit Remarks"
             value={remarks[item.id] || ""}
-            onChange={(e) =>
+            onChange={(event) =>
               setRemarks((old) => ({
                 ...old,
-                [item.id]: e.target.value,
+                [item.id]: event.target.value,
               }))
             }
           />
 
           {photos[item.id] && (
-            <img src={photos[item.id]} className="exec-photo" alt="Proof" />
+            <img
+              src={photos[item.id]}
+              className="exec-photo"
+              alt="Visit Proof"
+            />
           )}
         </div>
       ))}

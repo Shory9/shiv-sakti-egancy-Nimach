@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../supabaseClient";
 import CaseActions from "./CaseActions";
 
@@ -19,6 +19,11 @@ type Executive = {
   agent_code?: string | null;
 };
 
+type PaymentRecord = {
+  case_id: number;
+  amount: number;
+};
+
 type CasesTableProps = {
   cases: CaseItem[];
   onDeleteCase: (id: number) => void;
@@ -28,9 +33,11 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
   const [search, setSearch] = useState("");
   const [localCases, setLocalCases] = useState<CaseItem[]>(cases);
   const [executives, setExecutives] = useState<Executive[]>([]);
-  const [selectedAgents, setSelectedAgents] = useState<Record<number, string>>(
-    {}
-  );
+  const [payments, setPayments] = useState<PaymentRecord[]>([]);
+
+  const [selectedAgents, setSelectedAgents] = useState<
+    Record<number, string>
+  >({});
 
   useEffect(() => {
     setLocalCases(cases);
@@ -38,6 +45,7 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
 
   useEffect(() => {
     loadExecutives();
+    loadPayments();
   }, []);
 
   async function loadExecutives() {
@@ -55,9 +63,23 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
     setExecutives((data || []) as Executive[]);
   }
 
+  async function loadPayments() {
+    const { data, error } = await supabase
+      .from("payments")
+      .select("case_id, amount");
+
+    if (error) {
+      alert("Payment load error: " + error.message);
+      return;
+    }
+
+    setPayments((data || []) as PaymentRecord[]);
+  }
+
   function formatAgent(agent: Executive) {
     const code =
-      agent.agent_code || "SS" + String(agent.id).padStart(3, "0");
+      agent.agent_code ||
+      "SS" + String(agent.id).padStart(3, "0");
 
     return `${code} - ${agent.name}`;
   }
@@ -76,13 +98,33 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
     return item.agent || "Unassigned";
   }
 
-  const filteredCases = localCases.filter((item) =>
-    `${item.id} ${item.customer} ${item.phone} ${item.bank} ${getAgentName(
-      item
-    )} ${item.status}`
-      .toLowerCase()
-      .includes(search.toLowerCase())
-  );
+  function getPaidAmount(caseId: number) {
+    return payments
+      .filter((payment) => payment.case_id === caseId)
+      .reduce(
+        (total, payment) =>
+          total + Number(payment.amount || 0),
+        0
+      );
+  }
+
+  const filteredCases = useMemo(() => {
+    return localCases.filter((item) => {
+      const paidAmount = getPaidAmount(item.id);
+      const pendingAmount = Math.max(
+        Number(item.amount || 0) - paidAmount,
+        0
+      );
+
+      return `${item.id} ${item.customer} ${item.phone} ${
+        item.bank
+      } ${getAgentName(item)} ${
+        item.status
+      } ${paidAmount} ${pendingAmount}`
+        .toLowerCase()
+        .includes(search.toLowerCase());
+    });
+  }, [localCases, search, executives, payments]);
 
   async function assignExecutive(caseId: number) {
     const selectedId = selectedAgents[caseId];
@@ -133,7 +175,9 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
       [caseId]: "",
     }));
 
-    alert(`Case ${caseId} assigned to ${formatAgent(matched)}`);
+    alert(
+      `Case ${caseId} assigned to ${formatAgent(matched)}`
+    );
   }
 
   async function updateStatus(
@@ -159,7 +203,7 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
 
   return (
     <div className="cases-panel">
-      <h2>Recovery Cases</h2>
+      <h2>Recovery Cases & Payments</h2>
 
       <input
         placeholder="Search case, customer, phone, bank, executive..."
@@ -178,7 +222,9 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
               <th>Customer</th>
               <th>Phone</th>
               <th>Bank</th>
-              <th>Amount</th>
+              <th>Loan Amount</th>
+              <th>Paid Amount</th>
+              <th>Pending Amount</th>
               <th>Assigned Executive</th>
               <th>Assign / Reassign</th>
               <th>Status</th>
@@ -187,52 +233,96 @@ function CasesTable({ cases, onDeleteCase }: CasesTableProps) {
           </thead>
 
           <tbody>
-            {filteredCases.map((item) => (
-              <tr key={item.id}>
-                <td>{item.id}</td>
-                <td>{item.customer}</td>
-                <td>{item.phone}</td>
-                <td>{item.bank}</td>
-                <td>₹{item.amount.toLocaleString("en-IN")}</td>
-                <td>{getAgentName(item)}</td>
+            {filteredCases.map((item) => {
+              const paidAmount = getPaidAmount(item.id);
 
-                <td>
-                  <select
-                    value={selectedAgents[item.id] || ""}
-                    onChange={(event) =>
-                      setSelectedAgents((old) => ({
-                        ...old,
-                        [item.id]: event.target.value,
-                      }))
-                    }
-                  >
-                    <option value="">Select Executive</option>
+              const pendingAmount = Math.max(
+                Number(item.amount || 0) - paidAmount,
+                0
+              );
 
-                    {executives.map((executive) => (
-                      <option key={executive.id} value={executive.id}>
-                        {formatAgent(executive)}
-                      </option>
-                    ))}
-                  </select>
-                </td>
+              return (
+                <tr key={item.id}>
+                  <td>{item.id}</td>
+                  <td>{item.customer}</td>
+                  <td>{item.phone}</td>
+                  <td>{item.bank}</td>
 
-                <td>
-                  <span className={`status ${item.status.toLowerCase()}`}>
-                    {item.status}
-                  </span>
-                </td>
+                  <td>
+                    ₹{Number(item.amount).toLocaleString("en-IN")}
+                  </td>
 
-                <td>
-                  <CaseActions
-                    onAssign={() => assignExecutive(item.id)}
-                    onVisit={() => updateStatus(item.id, "Visited")}
-                    onPayment={() => updateStatus(item.id, "Paid")}
-                    onEdit={() => updateStatus(item.id, "Overdue")}
-                    onDelete={() => onDeleteCase(item.id)}
-                  />
+                  <td>
+                    ₹{paidAmount.toLocaleString("en-IN")}
+                  </td>
+
+                  <td>
+                    ₹{pendingAmount.toLocaleString("en-IN")}
+                  </td>
+
+                  <td>{getAgentName(item)}</td>
+
+                  <td>
+                    <select
+                      value={selectedAgents[item.id] || ""}
+                      onChange={(event) =>
+                        setSelectedAgents((old) => ({
+                          ...old,
+                          [item.id]: event.target.value,
+                        }))
+                      }
+                    >
+                      <option value="">Select Executive</option>
+
+                      {executives.map((executive) => (
+                        <option
+                          key={executive.id}
+                          value={executive.id}
+                        >
+                          {formatAgent(executive)}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+
+                  <td>
+                    <span
+                      className={`status ${item.status.toLowerCase()}`}
+                    >
+                      {item.status}
+                    </span>
+                  </td>
+
+                  <td>
+                    <CaseActions
+                      onAssign={() =>
+                        assignExecutive(item.id)
+                      }
+                      onVisit={() =>
+                        updateStatus(item.id, "Visited")
+                      }
+                      onPayment={() =>
+                        updateStatus(item.id, "Paid")
+                      }
+                      onEdit={() =>
+                        updateStatus(item.id, "Overdue")
+                      }
+                      onDelete={() =>
+                        onDeleteCase(item.id)
+                      }
+                    />
+                  </td>
+                </tr>
+              );
+            })}
+
+            {filteredCases.length === 0 && (
+              <tr>
+                <td colSpan={11}>
+                  No recovery cases found.
                 </td>
               </tr>
-            ))}
+            )}
           </tbody>
         </table>
       </div>
