@@ -34,13 +34,8 @@ function ExecutiveCases({
 }: Props) {
   const [search, setSearch] = useState("");
 
-  const [remarks, setRemarks] = useState<
-    Record<number, string>
-  >({});
-
-  const [photos, setPhotos] = useState<
-    Record<number, string>
-  >({});
+  const [remarks, setRemarks] = useState<Record<number, string>>({});
+  const [photos, setPhotos] = useState<Record<number, string>>({});
 
   const filteredCases = useMemo(() => {
     const value = search.trim().toLowerCase();
@@ -52,16 +47,21 @@ function ExecutiveCases({
         item.id,
         item.customer,
         item.phone,
+        item.bank,
+        item.status,
         item.address,
         item.accountNo,
+        item.branchName,
+        item.schemeCode,
+        item.accountSegment,
         item.assetClassification,
-        item.status,
+        executive.area,
       ]
         .join(" ")
         .toLowerCase()
         .includes(value)
     );
-  }, [myCases, search]);
+  }, [myCases, search, executive.area]);
 
   function handlePhoto(
     caseId: number,
@@ -101,10 +101,8 @@ function ExecutiveCases({
             customer: item.customer,
             area: executive.area,
             status,
-            latitude:
-              position.coords.latitude.toFixed(6),
-            longitude:
-              position.coords.longitude.toFixed(6),
+            latitude: position.coords.latitude.toFixed(6),
+            longitude: position.coords.longitude.toFixed(6),
             remarks: remarks[item.id] || "",
             photo: photos[item.id] || "",
             time: new Date().toLocaleString("en-IN"),
@@ -118,16 +116,11 @@ function ExecutiveCases({
         if (status === "Checked Out") {
           const { error: caseError } = await supabase
             .from("cases")
-            .update({
-              status: "Visited",
-            })
+            .update({ status: "Visited" })
             .eq("id", item.id);
 
           if (caseError) {
-            alert(
-              "Case status update error: " +
-                caseError.message
-            );
+            alert("Case status error: " + caseError.message);
             return;
           }
 
@@ -174,11 +167,9 @@ function ExecutiveCases({
       <div className="exec-card">
         <input
           className="exec-input"
-          placeholder="🔍 Search customer, phone, address or account..."
+          placeholder="🔍 Search name, phone, address, account, branch or category..."
           value={search}
-          onChange={(event) =>
-            setSearch(event.target.value)
-          }
+          onChange={(event) => setSearch(event.target.value)}
         />
       </div>
 
@@ -189,15 +180,20 @@ function ExecutiveCases({
       )}
 
       {filteredCases.map((item) => (
-        <div
-          className="exec-card"
-          key={item.id}
-        >
-          <p>
-            <strong>Case ID:</strong> #{item.id}
-          </p>
+        <div className="exec-card" key={item.id}>
+          <div className="exec-case-heading">
+            <div>
+              <p>
+                <strong>Case ID:</strong> #{item.id}
+              </p>
 
-          <h3>{item.customer || "Unknown Customer"}</h3>
+              <h3>{item.customer || "Unknown Customer"}</h3>
+            </div>
+
+            <span className={`status ${item.status.toLowerCase()}`}>
+              {item.status}
+            </span>
+          </div>
 
           <p>
             <strong>📍 Address:</strong>{" "}
@@ -210,21 +206,56 @@ function ExecutiveCases({
           </p>
 
           <p>
+            <strong>🏦 Branch:</strong>{" "}
+            {item.branchName || item.bank || "No branch"}
+          </p>
+
+          <p>
+            <strong>🆔 Account:</strong>{" "}
+            {item.accountNo || "Not available"}
+          </p>
+
+          <p>
+            <strong>📑 Scheme:</strong>{" "}
+            {item.schemeCode || "Not available"}
+          </p>
+
+          <p>
+            <strong>📂 Segment:</strong>{" "}
+            {item.accountSegment || "Not available"}
+          </p>
+
+          <p>
+            <strong>🔴 Category:</strong>{" "}
+            {item.assetClassification || "Not available"}
+          </p>
+
+          <hr />
+
+          <p>
             <strong>💰 Outstanding:</strong>{" "}
             ₹{formatMoney(item.amount)}
           </p>
 
           <p>
-            <strong>📌 Status:</strong>{" "}
-            {item.status}
+            <strong>⏳ Pending:</strong>{" "}
+            ₹{formatMoney(item.pendingAmount)}
           </p>
 
-          {item.assetClassification && (
-            <p>
-              <strong>🏷 Category:</strong>{" "}
-              {item.assetClassification}
-            </p>
-          )}
+          <p>
+            <strong>🏦 Sanction Limit:</strong>{" "}
+            ₹{formatMoney(item.sanctionLimit)}
+          </p>
+
+          <p>
+            <strong>💳 Customer Balance:</strong>{" "}
+            ₹{formatMoney(item.customerBalance)}
+          </p>
+
+          <p>
+            <strong>🗺 Working Area:</strong>{" "}
+            {executive.area || "Not set"}
+          </p>
 
           <div className="exec-action-row">
             {item.phone && (
@@ -237,18 +268,14 @@ function ExecutiveCases({
 
             <button
               className="exec-primary-btn"
-              onClick={() =>
-                saveVisit(item, "Checked In")
-              }
+              onClick={() => saveVisit(item, "Checked In")}
             >
               📍 Check In
             </button>
 
             <button
               className="exec-danger-btn"
-              onClick={() =>
-                saveVisit(item, "Checked Out")
-              }
+              onClick={() => saveVisit(item, "Checked Out")}
             >
               ⏹ Check Out
             </button>
