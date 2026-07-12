@@ -52,21 +52,16 @@ function ExecutiveCases({
         item.id,
         item.customer,
         item.phone,
-        item.bank,
-        item.status,
         item.address,
         item.accountNo,
-        item.branchName,
-        item.schemeCode,
-        item.accountSegment,
         item.assetClassification,
-        executive.area,
+        item.status,
       ]
         .join(" ")
         .toLowerCase()
         .includes(value)
     );
-  }, [myCases, search, executive.area]);
+  }, [myCases, search]);
 
   function handlePhoto(
     caseId: number,
@@ -179,7 +174,7 @@ function ExecutiveCases({
       <div className="exec-card">
         <input
           className="exec-input"
-          placeholder="🔍 Search name, phone, account, branch, DB category..."
+          placeholder="🔍 Search customer, phone, address or account..."
           value={search}
           onChange={(event) =>
             setSearch(event.target.value)
@@ -198,23 +193,11 @@ function ExecutiveCases({
           className="exec-card"
           key={item.id}
         >
-          <div className="exec-case-heading">
-            <div>
-              <p>
-                <strong>Case ID:</strong> #{item.id}
-              </p>
+          <p>
+            <strong>Case ID:</strong> #{item.id}
+          </p>
 
-              <h3>
-                {item.customer || "Unknown Customer"}
-              </h3>
-            </div>
-
-            <span
-              className={`status ${item.status.toLowerCase()}`}
-            >
-              {item.status}
-            </span>
-          </div>
+          <h3>{item.customer || "Unknown Customer"}</h3>
 
           <p>
             <strong>📍 Address:</strong>{" "}
@@ -227,59 +210,21 @@ function ExecutiveCases({
           </p>
 
           <p>
-            <strong>🏦 Branch:</strong>{" "}
-            {item.branchName ||
-              item.bank ||
-              "No branch"}
-          </p>
-
-          <p>
-            <strong>🆔 Account:</strong>{" "}
-            {item.accountNo || "Not available"}
-          </p>
-
-          <p>
-            <strong>📑 Scheme:</strong>{" "}
-            {item.schemeCode || "Not available"}
-          </p>
-
-          <p>
-            <strong>📂 Segment:</strong>{" "}
-            {item.accountSegment || "Not available"}
-          </p>
-
-          <p>
-            <strong>🔴 Category:</strong>{" "}
-            {item.assetClassification ||
-              "Not available"}
-          </p>
-
-          <hr />
-
-          <p>
             <strong>💰 Outstanding:</strong>{" "}
             ₹{formatMoney(item.amount)}
           </p>
 
           <p>
-            <strong>⏳ Pending:</strong>{" "}
-            ₹{formatMoney(item.pendingAmount)}
+            <strong>📌 Status:</strong>{" "}
+            {item.status}
           </p>
 
-          <p>
-            <strong>🏦 Sanction Limit:</strong>{" "}
-            ₹{formatMoney(item.sanctionLimit)}
-          </p>
-
-          <p>
-            <strong>💳 Customer Balance:</strong>{" "}
-            ₹{formatMoney(item.customerBalance)}
-          </p>
-
-          <p>
-            <strong>🗺 Working Area:</strong>{" "}
-            {executive.area || "Not set"}
-          </p>
+          {item.assetClassification && (
+            <p>
+              <strong>🏷 Category:</strong>{" "}
+              {item.assetClassification}
+            </p>
+          )}
 
           <div className="exec-action-row">
             {item.phone && (
