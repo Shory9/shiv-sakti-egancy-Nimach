@@ -22,7 +22,10 @@ type ImportedCase = {
   loanType: string;
   amount: number;
   pendingAmount: number;
-  area: string;
+  address: string;
+  accountNo: string;
+  accountSegment: string;
+  assetClassification: string;
   remarks: string;
 };
 
@@ -55,27 +58,48 @@ function ExecutiveManagement() {
   const [area, setArea] = useState("");
   const [vehicle, setVehicle] = useState("");
 
-  function formatAgentCode(id: number, code?: string | null) {
-    return code || "SS" + String(id).padStart(3, "0");
+  function normalizeHeader(value: string) {
+    return value.toLowerCase().replace(/[^a-z0-9]/g, "");
   }
 
-  function findValue(row: Record<string, unknown>, keys: string[]) {
+  function getValue(
+    row: Record<string, unknown>,
+    possibleHeaders: string[]
+  ) {
     const rowKeys = Object.keys(row);
 
-    for (const key of keys) {
-      const foundKey = rowKeys.find((item) =>
-        item
-          .toLowerCase()
-          .replace(/\s/g, "")
-          .includes(key.toLowerCase())
+    for (const header of possibleHeaders) {
+      const wanted = normalizeHeader(header);
+      const exactKey = rowKeys.find(
+        (key) => normalizeHeader(key) === wanted
       );
 
-      if (foundKey) {
-        return String(row[foundKey] || "");
+      if (exactKey) {
+        return String(row[exactKey] ?? "").trim();
       }
     }
 
     return "";
+  }
+
+  function parseLakhAmount(value: unknown) {
+    const original = String(value ?? "").trim();
+
+    if (!original) return 0;
+
+    const cleaned = original
+      .replace(/[₹,\s]/g, "")
+      .replace(/[^0-9.eE+-]/g, "");
+
+    const parsed = Number(cleaned);
+
+    if (!Number.isFinite(parsed)) return 0;
+
+    return Math.round(parsed * 100000 * 100) / 100;
+  }
+
+  function formatAgentCode(id: number, code?: string | null) {
+    return code || "SS" + String(id).padStart(3, "0");
   }
 
   async function loadExecutives() {
@@ -137,8 +161,7 @@ function ExecutiveManagement() {
       return;
     }
 
-    const agentCode =
-      "SS" + String(data.id).padStart(3, "0");
+    const agentCode = "SS" + String(data.id).padStart(3, "0");
 
     const { error: codeError } = await supabase
       .from("agents")
@@ -146,9 +169,7 @@ function ExecutiveManagement() {
       .eq("id", data.id);
 
     if (codeError) {
-      alert(
-        "Agent code update error: " + codeError.message
-      );
+      alert("Agent code update error: " + codeError.message);
       return;
     }
 
@@ -168,20 +189,20 @@ function ExecutiveManagement() {
     const ok = window.confirm(
       `${formatAgentCode(item.id, item.agent_code)} - ${
         item.name
-      } ko permanently delete karna hai?\n\nIs executive ke assigned cases bhi delete ho jayenge.`
+      } ko permanently delete karna hai?\n\nAssigned cases delete nahi honge; Unassigned ho jayenge.`
     );
 
     if (!ok) return;
 
-    const { error: casesError } = await supabase
+    const { error: unassignError } = await supabase
       .from("cases")
-      .delete()
+      .update({ assigned_agent: null })
       .eq("assigned_agent", item.id);
 
-    if (casesError) {
+    if (unassignError) {
       alert(
-        "Executive cases delete error: " +
-          casesError.message
+        "Executive cases unassign error: " +
+          unassignError.message
       );
       return;
     }
@@ -203,9 +224,7 @@ function ExecutiveManagement() {
       old.filter((executive) => executive.id !== item.id)
     );
 
-    alert(
-      `${item.name} aur uske assigned cases delete ho gaye.`
-    );
+    alert(`${item.name} delete ho gaya. Cases safe hain.`);
   }
 
   async function toggleStatus(item: Executive) {
@@ -249,7 +268,6 @@ function ExecutiveManagement() {
     event: ChangeEvent<HTMLInputElement>
   ) {
     const file = event.target.files?.[0];
-
     event.target.value = "";
 
     if (!file) return;
@@ -258,9 +276,7 @@ function ExecutiveManagement() {
       `${formatAgentCode(
         executive.id,
         executive.agent_code
-      )} - ${
-        executive.name
-      } ke liye cases upload kar rahe ho.\n\nArea: ${
+      )} - ${executive.name} ke liye cases upload kar rahe ho.\n\nArea: ${
         executive.area
       }\nFile: ${file.name}\n\nContinue?`
     );
@@ -277,118 +293,139 @@ function ExecutiveManagement() {
           type: "array",
         });
 
-        const sheetName = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[sheetName];
+        const sheetName =
+          workbook.SheetNames.find(
+            (sheet) =>
+              sheet.trim().toUpperCase() === "NPA LIST" ||
+              sheet.trim().toUpperCase() === "LIST"
+          ) || workbook.SheetNames[0];
+
+        const worksheet = workbook.Sheets[sheetName];
 
         const rows =
           XLSX.utils.sheet_to_json<Record<string, unknown>>(
-            sheet
+            worksheet,
+            {
+              defval: "",
+              raw: true,
+            }
           );
 
         const parsedCases: ImportedCase[] = rows
           .map((row) => {
-            const customer =
-              findValue(row, [
-                "a/cname",
-                "customer",
-                "name",
-                "borrower",
-                "party",
-              ]) || "";
+            const customer = getValue(row, [
+              "A/C Name",
+              "Customer Name",
+              "Borrower Name",
+              "Name",
+            ]);
 
-            const mobile =
-              findValue(row, [
-                "mobileno",
-                "mobile",
-                "phone",
-                "contact",
-              ]) || "";
+            const mobile = getValue(row, [
+              "MOBILE NO",
+              "MOBILE",
+              "Mobile No",
+              "Mobile",
+              "Phone",
+              "Contact",
+            ]);
 
-            const bank =
-              findValue(row, [
-                "branch",
-                "bank",
-              ]) || "Assigned Bank File";
+            const branch = getValue(row, [
+              "Branch",
+              "Branch Name",
+            ]);
 
-            const amountText =
-              findValue(row, [
-                "balance[inr]",
-                "loanamount",
-                "amount",
-                "outstanding",
-                "balance",
-              ]) || "0";
+            const balanceText = getValue(row, [
+              "Cust. Bal",
+              "CUST BAL",
+              "Customer Balance",
+              "O/S Balance",
+              "OS Balance",
+              "Balance [INR]",
+            ]);
 
-            const pendingText =
-              findValue(row, [
-                "pending",
-                "due",
-                "overdue",
-                "outstanding",
-                "balance[inr]",
-              ]) || amountText;
+            const address = getValue(row, [
+              "ADDRESS",
+              "Address",
+              "Customer Address",
+            ]);
 
-            const caseArea =
-              findValue(row, [
-                "area",
-                "alpha",
-                "city",
-                "location",
-                "address",
-              ]) || executive.area;
+            const accountNo = getValue(row, [
+              "A/C No",
+              "Account ID",
+              "Account No",
+              "Account Number",
+            ]);
+
+            const accountSegment = getValue(row, [
+              "REV SEG",
+              "Account Segment",
+            ]);
+
+            const assetClassification = getValue(row, [
+              "Class",
+              "Asset Classification",
+              "Category",
+            ]).toUpperCase();
+
+            const loanType =
+              getValue(row, [
+                "Scheme Code",
+                "Loan Type",
+                "Product",
+                "Type",
+              ]) || "Recovery";
+
+            const amount = parseLakhAmount(balanceText);
 
             return {
               customer,
               phone: mobile,
-              bank,
-              loanType:
-                findValue(row, [
-                  "schemecode",
-                  "loantype",
-                  "product",
-                  "type",
-                ]) || "Recovery",
-
-              amount:
-                Number(
-                  String(amountText)
-                    .replace(/,/g, "")
-                    .replace(/[^0-9.-]/g, "")
-                ) || 0,
-
-              pendingAmount:
-                Number(
-                  String(pendingText)
-                    .replace(/,/g, "")
-                    .replace(/[^0-9.-]/g, "")
-                ) || 0,
-
-              area: caseArea,
-
-              remarks: `Uploaded directly for ${formatAgentCode(
-                executive.id,
-                executive.agent_code
-              )} - ${executive.name}. Working Area: ${
-                executive.area
-              }. File: ${file.name}`,
+              bank: branch || "Assigned Bank File",
+              loanType,
+              amount,
+              pendingAmount: amount,
+              address,
+              accountNo,
+              accountSegment,
+              assetClassification,
+              remarks: [
+                `Uploaded directly for ${formatAgentCode(
+                  executive.id,
+                  executive.agent_code
+                )} - ${executive.name}`,
+                `Working Area: ${executive.area}`,
+                `Source File: ${file.name}`,
+              ].join(" | "),
             };
           })
           .filter(
             (item) =>
+              item.accountNo ||
               item.customer ||
               item.phone ||
               item.amount > 0
           );
 
         if (parsedCases.length === 0) {
-          alert(
-            "Excel read hui, lekin valid cases nahi mile."
-          );
+          alert("Excel read hui, lekin valid cases nahi mile.");
           return;
         }
 
+        const missingAddressCount = parsedCases.filter(
+          (item) => !item.address
+        ).length;
+
         const confirmImport = window.confirm(
-          `${parsedCases.length} cases directly ${executive.name} ko assign honge.\n\nImport karein?`
+          [
+            `${parsedCases.length} cases directly ${executive.name} ko assign honge.`,
+            "",
+            `Full address found: ${
+              parsedCases.length - missingAddressCount
+            }`,
+            `Missing address: ${missingAddressCount}`,
+            "",
+            "Import karein?",
+          ].join("\n")
         );
 
         if (!confirmImport) return;
@@ -396,18 +433,19 @@ function ExecutiveManagement() {
         const rowsToInsert = parsedCases.map((item) => ({
           customer_name:
             item.customer || "Unknown Customer",
-
           mobile: item.phone,
           bank_name: item.bank,
           loan_type: item.loanType,
           loan_amount: item.amount,
-
-          pending_amount:
-            item.pendingAmount || item.amount,
-
-          address: item.area,
+          pending_amount: item.pendingAmount,
+          address: item.address,
           status: "Pending",
           assigned_agent: executive.id,
+          account_no: item.accountNo,
+          branch_name: item.bank,
+          scheme_code: item.loanType,
+          account_segment: item.accountSegment,
+          asset_classification: item.assetClassification,
           remarks: item.remarks,
         }));
 
@@ -457,11 +495,14 @@ function ExecutiveManagement() {
         await loadExecutives();
 
         alert(
-          `Upload complete.\n${imported} cases assigned to ${executive.name}.`
+          `Upload complete.\n${imported} cases assigned to ${executive.name}.\nFull customer address database me save ho gaya.`
         );
-      } catch {
+      } catch (error) {
         alert(
-          "Excel read error. File format check karo."
+          "Excel read error: " +
+            (error instanceof Error
+              ? error.message
+              : "File format check karo.")
         );
       }
     };
@@ -474,9 +515,8 @@ function ExecutiveManagement() {
       <h2>👨‍💼 Field Executive Management</h2>
 
       <p>
-        Field executives add karo aur unka fixed Working
-        Area select karo. Bank Excel ke cases isi area ke
-        hisaab se automatically assign honge.
+        Area-wise XLS directly executive ko upload karo. Full
+        customer address executive app me show hoga.
       </p>
 
       <hr />
@@ -486,9 +526,7 @@ function ExecutiveManagement() {
       <input
         placeholder="Executive Full Name"
         value={name}
-        onChange={(event) =>
-          setName(event.target.value)
-        }
+        onChange={(event) => setName(event.target.value)}
       />
 
       <br />
@@ -497,9 +535,7 @@ function ExecutiveManagement() {
       <input
         placeholder="Mobile Number"
         value={phone}
-        onChange={(event) =>
-          setPhone(event.target.value)
-        }
+        onChange={(event) => setPhone(event.target.value)}
       />
 
       <br />
@@ -507,19 +543,12 @@ function ExecutiveManagement() {
 
       <select
         value={area}
-        onChange={(event) =>
-          setArea(event.target.value)
-        }
+        onChange={(event) => setArea(event.target.value)}
       >
-        <option value="">
-          Select Working Area
-        </option>
+        <option value="">Select Working Area</option>
 
         {WORKING_AREAS.map((workingArea) => (
-          <option
-            key={workingArea}
-            value={workingArea}
-          >
+          <option key={workingArea} value={workingArea}>
             {workingArea}
           </option>
         ))}
@@ -531,9 +560,7 @@ function ExecutiveManagement() {
       <input
         placeholder="Vehicle Number / Vehicle Type"
         value={vehicle}
-        onChange={(event) =>
-          setVehicle(event.target.value)
-        }
+        onChange={(event) => setVehicle(event.target.value)}
       />
 
       <br />
@@ -624,9 +651,7 @@ function ExecutiveManagement() {
 
               <td>
                 <button
-                  onClick={() =>
-                    toggleStatus(item)
-                  }
+                  onClick={() => toggleStatus(item)}
                 >
                   {item.status === "Active"
                     ? "Deactivate"
@@ -634,9 +659,7 @@ function ExecutiveManagement() {
                 </button>{" "}
 
                 <button
-                  onClick={() =>
-                    deleteExecutive(item)
-                  }
+                  onClick={() => deleteExecutive(item)}
                 >
                   Delete
                 </button>
