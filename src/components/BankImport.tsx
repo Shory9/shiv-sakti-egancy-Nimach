@@ -150,7 +150,6 @@ const ADDRESS_AREA_PRIORITY: Array<{
 
 function BankImport() {
   const [bankName, setBankName] = useState("Bank of Baroda (BOB)");
-  const [defaultArea, setDefaultArea] = useState("");
   const [fileFormat, setFileFormat] = useState<FileFormat>("unknown");
   const [fileName, setFileName] = useState("");
   const [status, setStatus] = useState<ImportStatus>("idle");
@@ -222,17 +221,12 @@ function BankImport() {
   function resolveArea(
     alpha: string,
     branch: string,
-    address: string,
-    fallbackArea: string
+    address: string
   ) {
     const normalizedAlpha = normalize(alpha);
 
     if (ALPHA_AREA_MAP[normalizedAlpha]) {
       return ALPHA_AREA_MAP[normalizedAlpha];
-    }
-
-    if (fallbackArea) {
-      return fallbackArea;
     }
 
     const combined = normalize(`${branch} ${address}`);
@@ -402,14 +396,6 @@ function BankImport() {
           return;
         }
 
-        if (detectedFormat === "compact" && !defaultArea) {
-          setStatus("idle");
-          alert(
-            "Is compact bank file me Alpha/Branch nahi hai. Pehle 'Default Area for this file' select karo, phir file dobara choose karo."
-          );
-          return;
-        }
-
         const parsedCases: ImportedCase[] = rows
           .map((row) => {
             const accountNo = getValue(row, [
@@ -508,8 +494,7 @@ function BankImport() {
               resolvedArea: resolveArea(
                 alpha,
                 branch,
-                address,
-                detectedFormat === "compact" ? defaultArea : ""
+                address
               ),
             };
           })
@@ -629,7 +614,7 @@ function BankImport() {
         `Auto assigned preview: ${autoAssignedPreviewCount}`,
         `Unassigned preview: ${unassignedPreviewCount}`,
         "",
-        "Compact file me selected Default Area use hoga.",
+        "Compact file me Address se area auto-detect hoga.",
         "Detailed file me Alpha/Branch mapping use hogi.",
         "Duplicate Account IDs skip honge.",
         "",
@@ -812,11 +797,11 @@ function BankImport() {
 
   return (
     <div className="module-card">
-      <h1>📄 Final Safe Bank Excel Import</h1>
+      <h1>📄 Smart Auto-Detect Bank Excel Import</h1>
 
       <p>
         Detailed aur compact dono bank XLS formats supported hain.
-        Compact area-wise file ke liye pehle Default Area select karo.
+        System Alpha, Branch aur Address se area automatically detect karega.
       </p>
 
       <hr />
@@ -834,33 +819,6 @@ function BankImport() {
       <br />
       <br />
 
-      <h3>Default Area for Compact File</h3>
-
-      <select
-        value={defaultArea}
-        onChange={(event) => {
-          setDefaultArea(event.target.value);
-          setCases([]);
-          setFileName("");
-          setStatus("idle");
-          setFileFormat("unknown");
-        }}
-      >
-        <option value="">Select Area (only for compact area file)</option>
-
-        {WORKING_AREAS.map((workingArea) => (
-          <option key={workingArea} value={workingArea}>
-            {workingArea}
-          </option>
-        ))}
-      </select>
-
-      <p>
-        Agar sheet me sirf A/C No, A/C Name, Cust. Bal, Class,
-        Address aur Mobile hain to bank ne area column nahi diya.
-        Us case me yahan correct area select karna compulsory hai.
-      </p>
-
       <h3>Select Bank Excel</h3>
 
       <input
@@ -876,7 +834,6 @@ function BankImport() {
           <p><strong>Bank:</strong> {bankName}</p>
           <p><strong>File:</strong> {fileName}</p>
           <p><strong>Detected Format:</strong> {fileFormat}</p>
-          <p><strong>Default Area:</strong> {defaultArea || "Not selected"}</p>
           <p><strong>Status:</strong> {status}</p>
           <p><strong>Unique Cases:</strong> {cases.length}</p>
           <p>
@@ -1000,4 +957,4 @@ function BankImport() {
   );
 }
 
-export default BankImport
+export default BankImport;
