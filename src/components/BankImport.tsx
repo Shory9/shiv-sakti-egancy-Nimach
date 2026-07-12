@@ -3,6 +3,7 @@ import * as XLSX from "xlsx";
 import { supabase } from "../supabaseClient";
 
 type ImportStatus = "idle" | "ready" | "importing" | "imported";
+type FileFormat = "detailed" | "compact" | "unknown";
 
 type ImportedCase = {
   accountNo: string;
@@ -12,8 +13,12 @@ type ImportedCase = {
   branch: string;
   alpha: string;
   loanType: string;
+  accountSegment: string;
+  assetClassification: string;
   amount: number;
   pendingAmount: number;
+  sanctionLimit: number;
+  customerBalance: number;
   address: string;
   resolvedArea: string;
 };
@@ -26,33 +31,60 @@ type Agent = {
   status: string | null;
 };
 
-type AreaRule = {
-  area: string;
-  keywords: string[];
+const WORKING_AREAS = [
+  "CRPF Neemuch",
+  "Pustak Bajar Neemuch",
+  "Neemuch",
+  "Manasa",
+  "Mandsaur",
+  "MEN DB Mandsaur",
+  "Jaora",
+  "Bilpank",
+  "Khachrod",
+  "Sailana",
+  "Station Road Ratlam",
+  "Alkapuri Ratlam",
+  "College Road Ratlam",
+  "Chandni Chowk Ratlam",
+  "Bamaniya",
+  "Petlawad",
+  "Dhar",
+  "Manavar",
+  "Tonki",
+];
+
+const ALPHA_AREA_MAP: Record<string, string> = {
+  BAMANI: "Bamaniya",
+  MANDSA: "Mandsaur",
+  NEEMUC: "Neemuch",
+  SAILAN: "Sailana",
+  MANASA: "Manasa",
+  BILPAN: "Bilpank",
+  MANAWA: "Manavar",
+  JAORA: "Jaora",
+  VJNEEM: "CRPF Neemuch",
+  DBMSUR: "MEN DB Mandsaur",
 };
 
-const AREA_RULES: AreaRule[] = [
+const ADDRESS_AREA_PRIORITY: Array<{
+  area: string;
+  keywords: string[];
+}> = [
+  {
+    area: "Bamaniya",
+    keywords: ["BAMANIYA", "BAMANIA", "BAMANI", "BAMANIA MANDI"],
+  },
   {
     area: "CRPF Neemuch",
-    keywords: ["CRPF NEEMUCH", "CRPF ROAD NEEMUCH", "CRPF ROAD"],
+    keywords: ["CRPF ROAD NEEMUCH", "CRPF ROAD", "CRPF NEEMUCH"],
   },
   {
     area: "Pustak Bajar Neemuch",
-    keywords: [
-      "PUSTAK BAJAR NEEMUCH",
-      "PUSTAK BAZAR NEEMUCH",
-      "PUSTAK BAJAR",
-      "PUSTAK BAZAR",
-    ],
+    keywords: ["PUSTAK BAJAR", "PUSTAK BAZAR"],
   },
   {
     area: "MEN DB Mandsaur",
-    keywords: [
-      "MEN DB MANDSAUR",
-      "DB MANDSAUR",
-      "DBMSUR",
-      "MEN DB",
-    ],
+    keywords: ["MEN DB MANDSAUR", "DB MANDSAUR", "DBMSUR"],
   },
   {
     area: "Station Road Ratlam",
@@ -68,44 +100,15 @@ const AREA_RULES: AreaRule[] = [
   },
   {
     area: "Chandni Chowk Ratlam",
-    keywords: [
-      "CHANDNI CHOWK RATLAM",
-      "CHANDNI CHAUK RATLAM",
-      "CHANDNI CHOWK",
-      "CHANDNI CHAUK",
-    ],
+    keywords: ["CHANDNI CHOWK", "CHANDNI CHAUK"],
   },
   {
     area: "Khachrod",
-    keywords: ["KHACHROD", "KHACHRAUD", "KHACHROD ROAD"],
+    keywords: ["KHACHROD", "KHACHRAUD"],
   },
   {
     area: "Bilpank",
     keywords: ["BILPANK", "BILPAN", "BILPAAK"],
-  },
-  {
-    area: "Bamaniya",
-    keywords: ["BAMANIYA", "BAMANI"],
-  },
-  {
-    area: "Petlawad",
-    keywords: ["PETLAWAD", "PETLAWADA"],
-  },
-  {
-    area: "Dhar",
-    keywords: ["DHAAR", "DHAR"],
-  },
-  {
-    area: "Manavar",
-    keywords: ["MANAVAR", "MANAWAR", "MANAWA"],
-  },
-  {
-    area: "Tonki",
-    keywords: ["TONKI"],
-  },
-  {
-    area: "Jaora",
-    keywords: ["JAORA"],
   },
   {
     area: "Sailana",
@@ -121,22 +124,38 @@ const AREA_RULES: AreaRule[] = [
   },
   {
     area: "Neemuch",
-    keywords: [
-      "VIJAY NAGAR NEEMUCH",
-      "VJNEEM",
-      "NEEMUCH",
-      "NEEMUC",
-    ],
+    keywords: ["NEEMUCH", "NEEMUC"],
+  },
+  {
+    area: "Jaora",
+    keywords: ["JAORA"],
+  },
+  {
+    area: "Dhar",
+    keywords: ["DHAAR", "DHAR"],
+  },
+  {
+    area: "Manavar",
+    keywords: ["MANAWAR", "MANAVAR", "MANAWA"],
+  },
+  {
+    area: "Tonki",
+    keywords: ["TONKI"],
+  },
+  {
+    area: "Petlawad",
+    keywords: ["PETLAWAD", "PETLAWADA"],
   },
 ];
 
 function BankImport() {
-  const [bankName, setBankName] = useState("State Bank of India (SBI)");
+  const [bankName, setBankName] = useState("Bank of Baroda (BOB)");
+  const [defaultArea, setDefaultArea] = useState("");
+  const [fileFormat, setFileFormat] = useState<FileFormat>("unknown");
   const [fileName, setFileName] = useState("");
   const [status, setStatus] = useState<ImportStatus>("idle");
   const [cases, setCases] = useState<ImportedCase[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
-
   const [importedCount, setImportedCount] = useState(0);
   const [skippedCount, setSkippedCount] = useState(0);
   const [unassignedCount, setUnassignedCount] = useState(0);
@@ -170,37 +189,55 @@ function BankImport() {
       }
     }
 
-    for (const header of possibleHeaders) {
-      const wanted = normalizeHeader(header);
-
-      const partialKey = rowKeys.find((key) =>
-        normalizeHeader(key).includes(wanted)
-      );
-
-      if (partialKey) {
-        return String(row[partialKey] ?? "").trim();
-      }
-    }
-
     return "";
   }
 
-  function parseAmount(value: unknown) {
-    const cleaned = String(value ?? "")
-      .replace(/,/g, "")
-      .replace(/[^0-9.-]/g, "");
+  function hasHeader(
+    row: Record<string, unknown>,
+    possibleHeaders: string[]
+  ) {
+    const rowKeys = Object.keys(row).map(normalizeHeader);
 
-    return Number(cleaned) || 0;
+    return possibleHeaders.some((header) =>
+      rowKeys.includes(normalizeHeader(header))
+    );
+  }
+
+  function parseLakhAmount(value: unknown) {
+    const original = String(value ?? "").trim();
+
+    if (!original) return 0;
+
+    const cleaned = original
+      .replace(/[₹,\s]/g, "")
+      .replace(/[^0-9.eE+-]/g, "");
+
+    const parsed = Number(cleaned);
+
+    if (!Number.isFinite(parsed)) return 0;
+
+    return Math.round(parsed * 100000 * 100) / 100;
   }
 
   function resolveArea(
     alpha: string,
     branch: string,
-    address: string
+    address: string,
+    fallbackArea: string
   ) {
-    const combined = normalize(`${branch} ${address} ${alpha}`);
+    const normalizedAlpha = normalize(alpha);
 
-    for (const rule of AREA_RULES) {
+    if (ALPHA_AREA_MAP[normalizedAlpha]) {
+      return ALPHA_AREA_MAP[normalizedAlpha];
+    }
+
+    if (fallbackArea) {
+      return fallbackArea;
+    }
+
+    const combined = normalize(`${branch} ${address}`);
+
+    for (const rule of ADDRESS_AREA_PRIORITY) {
       const matched = rule.keywords.some((keyword) =>
         combined.includes(normalize(keyword))
       );
@@ -218,11 +255,13 @@ function BankImport() {
 
     const normalized = normalize(area);
 
-    for (const rule of AREA_RULES) {
-      if (normalize(rule.area) === normalized) {
-        return rule.area;
+    for (const workingArea of WORKING_AREAS) {
+      if (normalize(workingArea) === normalized) {
+        return workingArea;
       }
+    }
 
+    for (const rule of ADDRESS_AREA_PRIORITY) {
       const matched = rule.keywords.some(
         (keyword) => normalize(keyword) === normalized
       );
@@ -235,32 +274,8 @@ function BankImport() {
     return area.trim();
   }
 
-  function makeCaseKey(item: {
-    accountNo?: string;
-    customer: string;
-    phone: string;
-    bank: string;
-  }) {
-    const accountNo = normalize(item.accountNo || "");
-
-    if (accountNo) {
-      return `ACCOUNT:${accountNo}`;
-    }
-
-    return [
-      "FALLBACK",
-      normalize(item.customer),
-      normalize(item.phone),
-      normalize(item.bank),
-    ].join("|");
-  }
-
-  function extractAccountNo(remarks: string | null) {
-    if (!remarks) return "";
-
-    const match = remarks.match(/Account No:\s*([^|]+)/i);
-
-    return match ? match[1].trim() : "";
+  function makeCaseKey(item: { accountNo: string }) {
+    return normalize(item.accountNo);
   }
 
   async function loadActiveAgents() {
@@ -280,21 +295,15 @@ function BankImport() {
     return activeAgents;
   }
 
-  async function loadAllExistingCases() {
-    const allRows: Array<{
-      customer_name: string | null;
-      mobile: string | null;
-      bank_name: string | null;
-      remarks: string | null;
-    }> = [];
-
+  async function loadExistingAccountNumbers() {
+    const accountNumbers: string[] = [];
     const pageSize = 1000;
     let from = 0;
 
     while (true) {
       const { data, error } = await supabase
         .from("cases")
-        .select("customer_name, mobile, bank_name, remarks")
+        .select("account_no")
         .range(from, from + pageSize - 1);
 
       if (error) {
@@ -302,14 +311,19 @@ function BankImport() {
       }
 
       const rows = data || [];
-      allRows.push(...rows);
+
+      rows.forEach((item) => {
+        const key = normalize(item.account_no);
+
+        if (key) accountNumbers.push(key);
+      });
 
       if (rows.length < pageSize) break;
 
       from += pageSize;
     }
 
-    return allRows;
+    return accountNumbers;
   }
 
   async function handleFile(event: ChangeEvent<HTMLInputElement>) {
@@ -323,13 +337,16 @@ function BankImport() {
     setSkippedCount(0);
     setUnassignedCount(0);
     setStatus("idle");
+    setFileFormat("unknown");
 
     try {
       await loadActiveAgents();
     } catch (error) {
       alert(
         "Executive list error: " +
-          (error instanceof Error ? error.message : "Unknown error")
+          (error instanceof Error
+            ? error.message
+            : "Unknown error")
       );
       return;
     }
@@ -344,29 +361,75 @@ function BankImport() {
           type: "array",
         });
 
-        const firstSheetName = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[firstSheetName];
+        const preferredSheet =
+          workbook.SheetNames.find(
+            (name) =>
+              name.trim().toUpperCase() === "LIST" ||
+              name.trim().toUpperCase() === "NPA LIST"
+          ) || workbook.SheetNames[0];
+
+        const sheet = workbook.Sheets[preferredSheet];
 
         const rows =
-          XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet);
+          XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+            defval: "",
+            raw: true,
+          });
+
+        const firstRow = rows[0] || {};
+
+        const detailedFormat =
+          hasHeader(firstRow, ["Account ID", "Customer Name"]) &&
+          hasHeader(firstRow, ["O/S Balance", "OS Balance"]);
+
+        const compactFormat =
+          hasHeader(firstRow, ["A/C No", "A/C Name"]) &&
+          hasHeader(firstRow, ["Cust. Bal", "CUST BAL"]);
+
+        const detectedFormat: FileFormat = detailedFormat
+          ? "detailed"
+          : compactFormat
+          ? "compact"
+          : "unknown";
+
+        setFileFormat(detectedFormat);
+
+        if (detectedFormat === "unknown") {
+          setStatus("idle");
+          alert(
+            "Excel headers supported format se match nahi hue. A/C No/A/C Name ya Account ID/Customer Name headers check karo."
+          );
+          return;
+        }
+
+        if (detectedFormat === "compact" && !defaultArea) {
+          setStatus("idle");
+          alert(
+            "Is compact bank file me Alpha/Branch nahi hai. Pehle 'Default Area for this file' select karo, phir file dobara choose karo."
+          );
+          return;
+        }
 
         const parsedCases: ImportedCase[] = rows
           .map((row) => {
             const accountNo = getValue(row, [
+              "Account ID",
               "A/C No",
               "Account No",
               "Account Number",
             ]);
 
             const customer = getValue(row, [
-              "A/C Name",
               "Customer Name",
+              "A/C Name",
               "Borrower Name",
               "Name",
             ]);
 
             const phone = getValue(row, [
               "MOBILE NO",
+              "MOBILE",
+              "Mobile No",
               "Mobile",
               "Phone",
               "Contact",
@@ -375,8 +438,8 @@ function BankImport() {
             const alpha = getValue(row, ["Alpha"]).toUpperCase();
 
             const branch = getValue(row, [
-              "Branch",
               "Branch Name",
+              "Branch",
             ]);
 
             const loanType =
@@ -386,11 +449,37 @@ function BankImport() {
                 "Product",
               ]) || "Recovery";
 
-            const balanceText = getValue(row, [
-              "Balance [INR]",
-              "Balance",
+            const accountSegment = getValue(row, [
+              "Account Segment",
+              "REV SEG",
+            ]);
+
+            const assetClassification = getValue(row, [
+              "Asset Classification",
+              "Class",
+              "Category",
+            ]).toUpperCase();
+
+            const detailedOutstanding = getValue(row, [
+              "O/S Balance",
+              "OS Balance",
               "Outstanding",
               "Loan Amount",
+            ]);
+
+            const compactBalance = getValue(row, [
+              "Cust. Bal",
+              "CUST BAL",
+              "Customer Balance",
+            ]);
+
+            const amountText =
+              detectedFormat === "compact"
+                ? compactBalance
+                : detailedOutstanding;
+
+            const sanctionText = getValue(row, [
+              "Sanction Limit",
             ]);
 
             const address = getValue(row, [
@@ -399,7 +488,7 @@ function BankImport() {
               "Location",
             ]);
 
-            const amount = parseAmount(balanceText);
+            const amount = parseLakhAmount(amountText);
 
             return {
               accountNo,
@@ -409,10 +498,19 @@ function BankImport() {
               branch,
               alpha,
               loanType,
+              accountSegment,
+              assetClassification,
               amount,
               pendingAmount: amount,
+              sanctionLimit: parseLakhAmount(sanctionText),
+              customerBalance: parseLakhAmount(compactBalance),
               address,
-              resolvedArea: resolveArea(alpha, branch, address),
+              resolvedArea: resolveArea(
+                alpha,
+                branch,
+                address,
+                detectedFormat === "compact" ? defaultArea : ""
+              ),
             };
           })
           .filter(
@@ -428,7 +526,7 @@ function BankImport() {
         parsedCases.forEach((item) => {
           const key = makeCaseKey(item);
 
-          if (!uniqueCases.has(key)) {
+          if (key && !uniqueCases.has(key)) {
             uniqueCases.set(key, item);
           }
         });
@@ -441,9 +539,15 @@ function BankImport() {
         if (readyCases.length === 0) {
           alert("Excel read hui, lekin valid cases nahi mile.");
         }
-      } catch {
+      } catch (error) {
         setStatus("idle");
-        alert("Excel read error. File format check karo.");
+
+        alert(
+          "Excel read error: " +
+            (error instanceof Error
+              ? error.message
+              : "File format check karo.")
+        );
       }
     };
 
@@ -518,15 +622,16 @@ function BankImport() {
 
     const confirmed = window.confirm(
       [
-        "Area-wise automatic case assignment",
+        "Final Safe Bank Import",
         "",
+        `Detected format: ${fileFormat}`,
         `Total unique cases: ${cases.length}`,
         `Auto assigned preview: ${autoAssignedPreviewCount}`,
         `Unassigned preview: ${unassignedPreviewCount}`,
         "",
-        "Same area ke active agents ke beech cases equal distribute honge.",
-        "Jis area me active agent nahi hai, cases Unassigned rahenge.",
-        "Existing duplicate account numbers skip honge.",
+        "Compact file me selected Default Area use hoga.",
+        "Detailed file me Alpha/Branch mapping use hogi.",
+        "Duplicate Account IDs skip honge.",
         "",
         "Import continue karein?",
       ].join("\n")
@@ -546,37 +651,31 @@ function BankImport() {
     } catch (error) {
       alert(
         "Executive list error: " +
-          (error instanceof Error ? error.message : "Unknown error")
+          (error instanceof Error
+            ? error.message
+            : "Unknown error")
       );
       setStatus("ready");
       return;
     }
 
-    let existingData;
+    let existingAccountNumbers: string[];
 
     try {
-      existingData = await loadAllExistingCases();
+      existingAccountNumbers =
+        await loadExistingAccountNumbers();
     } catch (error) {
       alert(
         "Existing cases error: " +
-          (error instanceof Error ? error.message : "Unknown error")
+          (error instanceof Error
+            ? error.message
+            : "Unknown error")
       );
       setStatus("ready");
       return;
     }
 
-    const existingKeys = new Set<string>();
-
-    existingData.forEach((item) => {
-      existingKeys.add(
-        makeCaseKey({
-          accountNo: extractAccountNo(item.remarks),
-          customer: item.customer_name || "",
-          phone: item.mobile || "",
-          bank: item.bank_name || "",
-        })
-      );
-    });
+    const existingKeys = new Set(existingAccountNumbers);
 
     const newCases = cases.filter(
       (item) => !existingKeys.has(makeCaseKey(item))
@@ -587,11 +686,7 @@ function BankImport() {
 
     if (newCases.length === 0) {
       setStatus("imported");
-
-      alert(
-        `New imported: 0\nSkipped duplicates: ${skipped}`
-      );
-
+      alert(`New imported: 0\nSkipped duplicates: ${skipped}`);
       return;
     }
 
@@ -631,25 +726,25 @@ function BankImport() {
       return {
         customer_name: item.customer || "Unknown Customer",
         mobile: item.phone,
-
         bank_name: item.branch
           ? `${bankName} | ${item.branch}`
           : bankName,
-
         loan_type: item.loanType,
         loan_amount: item.amount,
-        pending_amount: item.pendingAmount || item.amount,
+        pending_amount: item.pendingAmount,
         address: item.address,
         status: "Pending",
-
-        assigned_agent: selectedAgent
-          ? selectedAgent.id
-          : null,
-
+        assigned_agent: selectedAgent ? selectedAgent.id : null,
+        account_no: item.accountNo,
+        branch_name: item.branch,
+        scheme_code: item.loanType,
+        account_segment: item.accountSegment,
+        asset_classification: item.assetClassification,
+        sanction_limit: item.sanctionLimit,
+        customer_balance: item.customerBalance,
         remarks: [
-          `Account No: ${item.accountNo || "Not Available"}`,
+          `File Format: ${fileFormat}`,
           `Alpha: ${item.alpha || "Not Available"}`,
-          `Branch: ${item.branch || "Not Available"}`,
           `Resolved Area: ${item.resolvedArea || "Unmatched"}`,
           `Area Assignment: ${assignedText}`,
           `Source File: ${fileName}`,
@@ -687,7 +782,7 @@ function BankImport() {
             `Error: ${error.message}`,
             "",
             "Same file dobara upload kar sakte ho.",
-            "Imported account numbers automatically skip honge.",
+            "Imported Account IDs automatically skip honge.",
           ].join("\n")
         );
 
@@ -705,7 +800,7 @@ function BankImport() {
 
     alert(
       [
-        "Area-wise import complete.",
+        "Final safe import complete.",
         "",
         `Imported: ${totalImported}`,
         `Skipped duplicates: ${skipped}`,
@@ -717,11 +812,11 @@ function BankImport() {
 
   return (
     <div className="module-card">
-      <h1>📄 Bank Excel Area-wise Auto Assignment</h1>
+      <h1>📄 Final Safe Bank Excel Import</h1>
 
       <p>
-        Complete bank Excel upload karo. Cases executive ke Working Area
-        ke hisaab se automatically aur equally distribute honge.
+        Detailed aur compact dono bank XLS formats supported hain.
+        Compact area-wise file ke liye pehle Default Area select karo.
       </p>
 
       <hr />
@@ -732,14 +827,41 @@ function BankImport() {
         value={bankName}
         onChange={(event) => setBankName(event.target.value)}
       >
-        <option>State Bank of India (SBI)</option>
         <option>Bank of Baroda (BOB)</option>
+        <option>State Bank of India (SBI)</option>
       </select>
 
       <br />
       <br />
 
-      <h3>Select Complete Bank Excel</h3>
+      <h3>Default Area for Compact File</h3>
+
+      <select
+        value={defaultArea}
+        onChange={(event) => {
+          setDefaultArea(event.target.value);
+          setCases([]);
+          setFileName("");
+          setStatus("idle");
+          setFileFormat("unknown");
+        }}
+      >
+        <option value="">Select Area (only for compact area file)</option>
+
+        {WORKING_AREAS.map((workingArea) => (
+          <option key={workingArea} value={workingArea}>
+            {workingArea}
+          </option>
+        ))}
+      </select>
+
+      <p>
+        Agar sheet me sirf A/C No, A/C Name, Cust. Bal, Class,
+        Address aur Mobile hain to bank ne area column nahi diya.
+        Us case me yahan correct area select karna compulsory hai.
+      </p>
+
+      <h3>Select Bank Excel</h3>
 
       <input
         type="file"
@@ -753,14 +875,14 @@ function BankImport() {
 
           <p><strong>Bank:</strong> {bankName}</p>
           <p><strong>File:</strong> {fileName}</p>
+          <p><strong>Detected Format:</strong> {fileFormat}</p>
+          <p><strong>Default Area:</strong> {defaultArea || "Not selected"}</p>
           <p><strong>Status:</strong> {status}</p>
           <p><strong>Unique Cases:</strong> {cases.length}</p>
-
           <p>
             <strong>Auto Assigned Preview:</strong>{" "}
             {autoAssignedPreviewCount}
           </p>
-
           <p>
             <strong>Unassigned Preview:</strong>{" "}
             {unassignedPreviewCount}
@@ -796,7 +918,6 @@ function BankImport() {
                 <tr key={item.area}>
                   <td><strong>{item.area}</strong></td>
                   <td>{item.totalCases}</td>
-
                   <td>
                     {item.agents.length > 0
                       ? item.agents
@@ -807,7 +928,6 @@ function BankImport() {
                           .join(", ")
                       : "No Active Executive"}
                   </td>
-
                   <td>
                     {item.agents.length > 0
                       ? `✅ Equal between ${item.agents.length} agent(s)`
@@ -829,10 +949,11 @@ function BankImport() {
               <tr>
                 <th>Account No.</th>
                 <th>Customer</th>
-                <th>Alpha</th>
-                <th>Branch</th>
-                <th>Resolved Area</th>
+                <th>Area</th>
+                <th>Category</th>
+                <th>Segment</th>
                 <th>Balance</th>
+                <th>Address</th>
               </tr>
             </thead>
 
@@ -841,12 +962,15 @@ function BankImport() {
                 <tr key={`${item.accountNo}-${index}`}>
                   <td>{item.accountNo}</td>
                   <td>{item.customer}</td>
-                  <td>{item.alpha}</td>
-                  <td>{item.branch}</td>
                   <td>{item.resolvedArea || "Unmatched"}</td>
+                  <td>{item.assetClassification || "-"}</td>
+                  <td>{item.accountSegment || "-"}</td>
                   <td>
-                    ₹{item.amount.toLocaleString("en-IN")}
+                    ₹{item.amount.toLocaleString("en-IN", {
+                      maximumFractionDigits: 2,
+                    })}
                   </td>
+                  <td>{item.address || "-"}</td>
                 </tr>
               ))}
             </tbody>
@@ -868,9 +992,7 @@ function BankImport() {
           <h3>✅ Import Complete</h3>
           <p>Imported: {importedCount}</p>
           <p>Skipped duplicates: {skippedCount}</p>
-          <p>
-            Auto assigned: {importedCount - unassignedCount}
-          </p>
+          <p>Auto assigned: {importedCount - unassignedCount}</p>
           <p>Unassigned: {unassignedCount}</p>
         </div>
       )}
@@ -878,4 +1000,4 @@ function BankImport() {
   );
 }
 
-export default BankImport;
+export default BankImport
