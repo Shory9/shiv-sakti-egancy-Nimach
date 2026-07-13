@@ -14,7 +14,10 @@ const menus = [
   "Reports",
 ];
 
-function Sidebar({ activeMenu, setActiveMenu }: SidebarProps) {
+function Sidebar({
+  activeMenu,
+  setActiveMenu,
+}: SidebarProps) {
   return (
     <aside className="sidebar">
       <h2>Shiv Shakti</h2>
@@ -23,7 +26,9 @@ function Sidebar({ activeMenu, setActiveMenu }: SidebarProps) {
       {menus.map((menu) => (
         <button
           key={menu}
-          className={activeMenu === menu ? "active" : ""}
+          className={
+            activeMenu === menu ? "active" : ""
+          }
           onClick={() => setActiveMenu(menu)}
         >
           {menu}

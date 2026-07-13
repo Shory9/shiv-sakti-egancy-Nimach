@@ -124,4 +124,14 @@ body {
   border-radius: 22px;
   padding: 32px;
   box-shadow: 0 14px 35px rgba(15, 23, 42, 0.08);
+}.sidebar-logo{
+    text-align:center;
+    padding:15px 10px 20px;
+}
+
+.sidebar-logo img{
+    width:100%;
+    max-width:170px;
+    border-radius:10px;
+    object-fit:contain;
 }
