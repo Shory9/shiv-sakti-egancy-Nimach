@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../supabaseClient";
 
 type Executive = {
@@ -34,15 +34,17 @@ function GPSTracking() {
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
 
   async function loadData() {
-    const agentsResult = await supabase
-      .from("agents")
-      .select("*")
-      .order("id", { ascending: false });
-
-    const visitsResult = await supabase
-      .from("gps_visits")
-      .select("*")
-      .order("id", { ascending: false });
+    const [agentsResult, visitsResult] = await Promise.all([
+      supabase
+        .from("agents")
+        .select("*")
+        .eq("status", "Active")
+        .order("id", { ascending: false }),
+      supabase
+        .from("gps_visits")
+        .select("*")
+        .order("id", { ascending: false }),
+    ]);
 
     if (agentsResult.error) {
       alert("Executive load error: " + agentsResult.error.message);
@@ -64,9 +66,22 @@ function GPSTracking() {
     return () => window.clearInterval(timer);
   }, []);
 
-  const activeCount = executives.filter((e) => e.status === "Active").length;
-  const liveAgents = executives.filter((e) => e.last_latitude && e.last_longitude);
-  const todayVisits = visits.length;
+  const liveAgents = useMemo(
+    () =>
+      executives.filter(
+        (e) => Boolean(e.last_latitude) && Boolean(e.last_longitude)
+      ),
+    [executives]
+  );
+
+  useEffect(() => {
+    if (
+      selectedAgentId !== null &&
+      !liveAgents.some((agent) => agent.id === selectedAgentId)
+    ) {
+      setSelectedAgentId(null);
+    }
+  }, [liveAgents, selectedAgentId]);
 
   const selectedAgent =
     liveAgents.find((e) => e.id === selectedAgentId) || liveAgents[0];
@@ -86,13 +101,13 @@ function GPSTracking() {
           <div className="card-icon">👨‍💼</div>
           <h3>Total Executives</h3>
           <h2>{executives.length}</h2>
-          <p>Field team members</p>
+          <p>Active field team members</p>
         </div>
 
         <div className="stat-card">
           <div className="card-icon">🟢</div>
           <h3>Active</h3>
-          <h2>{activeCount}</h2>
+          <h2>{executives.length}</h2>
           <p>Active executives</p>
         </div>
 
@@ -100,13 +115,13 @@ function GPSTracking() {
           <div className="card-icon">📡</div>
           <h3>Live GPS</h3>
           <h2>{liveAgents.length}</h2>
-          <p>Agents with live location</p>
+          <p>Active agents with live location</p>
         </div>
 
         <div className="stat-card">
           <div className="card-icon">📌</div>
           <h3>GPS Records</h3>
-          <h2>{todayVisits}</h2>
+          <h2>{visits.length}</h2>
           <p>Total saved visits</p>
         </div>
       </div>
@@ -174,7 +189,7 @@ function GPSTracking() {
 
       <br />
 
-      <h3>👨‍💼 Executive Live Tracking List</h3>
+      <h3>👨‍💼 Active Executive Live Tracking List</h3>
 
       <table>
         <thead>
@@ -191,7 +206,7 @@ function GPSTracking() {
 
         <tbody>
           {executives.map((item) => {
-            const hasLive = item.last_latitude && item.last_longitude;
+            const hasLive = Boolean(item.last_latitude) && Boolean(item.last_longitude);
 
             return (
               <tr key={item.id}>
@@ -208,9 +223,9 @@ function GPSTracking() {
                     {item.name}
                   </button>
                 </td>
-                <td>{item.phone}</td>
-                <td>{item.area}</td>
-                <td>{item.vehicle}</td>
+                <td>{item.phone || "-"}</td>
+                <td>{item.area || "-"}</td>
+                <td>{item.vehicle || "-"}</td>
                 <td>{item.is_online ? "🟢 Online" : "🔴 Offline"}</td>
                 <td>{item.last_seen || "Not updated"}</td>
                 <td>
