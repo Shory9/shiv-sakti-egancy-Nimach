@@ -28,9 +28,16 @@ type Agent = {
   status: string | null;
 };
 
+type ExistingCase = {
+  account_no: string | null;
+  assigned_agent: number | null;
+};
+
 type AreaSummaryItem = {
   area: string;
-  totalCases: number;
+  excelCases: number;
+  newCases: number;
+  existingAssignedCases: number;
   agents: Agent[];
 };
 
@@ -48,6 +55,14 @@ function BankImport() {
 
   const [cases, setCases] = useState<ParsedCase[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
+
+  const [existingAccountKeys, setExistingAccountKeys] =
+    useState<Set<string>>(new Set());
+
+  const [
+    existingAssignedByArea,
+    setExistingAssignedByArea,
+  ] = useState<Record<string, number>>({});
 
   const [duplicatePreviewCount, setDuplicatePreviewCount] =
     useState(0);
@@ -81,29 +96,33 @@ function BankImport() {
     return activeAgents;
   }
 
-  async function loadExistingAccountNumbers() {
-    const existing = new Set<string>();
+  async function loadExistingCases() {
+    const existingKeys = new Set<string>();
+    const existingRows: ExistingCase[] = [];
+
     const pageSize = 1000;
     let from = 0;
 
     while (true) {
       const { data, error } = await supabase
         .from("cases")
-        .select("account_no")
+        .select("account_no, assigned_agent")
         .range(from, from + pageSize - 1);
 
       if (error) {
         throw new Error(error.message);
       }
 
-      const rows = data || [];
+      const rows = (data || []) as ExistingCase[];
 
       rows.forEach((item) => {
         const key = normalizeText(item.account_no);
 
         if (key) {
-          existing.add(key);
+          existingKeys.add(key);
         }
+
+        existingRows.push(item);
       });
 
       if (rows.length < pageSize) {
@@ -113,7 +132,41 @@ function BankImport() {
       from += pageSize;
     }
 
-    return existing;
+    return {
+      existingKeys,
+      existingRows,
+    };
+  }
+
+  function buildExistingAreaCounts(
+    activeAgents: Agent[],
+    existingRows: ExistingCase[]
+  ) {
+    const agentAreaById = new Map<number, string>();
+
+    activeAgents.forEach((agent) => {
+      const area = agent.area?.trim() || "";
+
+      if (area) {
+        agentAreaById.set(agent.id, area);
+      }
+    });
+
+    const counts: Record<string, number> = {};
+
+    existingRows.forEach((item) => {
+      if (!item.assigned_agent) return;
+
+      const area = agentAreaById.get(
+        Number(item.assigned_agent)
+      );
+
+      if (!area) return;
+
+      counts[area] = (counts[area] || 0) + 1;
+    });
+
+    return counts;
   }
 
   async function handleFile(
@@ -126,6 +179,8 @@ function BankImport() {
     setFileName(file.name);
     setCases([]);
     setFileFormat("unknown");
+    setExistingAccountKeys(new Set());
+    setExistingAssignedByArea({});
     setDuplicatePreviewCount(0);
     setMissingAddressCount(0);
     setImportedCount(0);
@@ -134,15 +189,24 @@ function BankImport() {
     setStatus("idle");
 
     try {
-      await loadActiveAgents();
-
-      const result = await parseBankExcel(
-        file,
-        bankName
-      );
+      const [activeAgents, existingData, result] =
+        await Promise.all([
+          loadActiveAgents(),
+          loadExistingCases(),
+          parseBankExcel(file, bankName),
+        ]);
 
       setFileFormat(result.format);
       setCases(result.cases);
+      setExistingAccountKeys(
+        existingData.existingKeys
+      );
+      setExistingAssignedByArea(
+        buildExistingAreaCounts(
+          activeAgents,
+          existingData.existingRows
+        )
+      );
       setDuplicatePreviewCount(
         result.duplicateCount
       );
@@ -169,20 +233,60 @@ function BankImport() {
   }
 
   const areaSummary = useMemo<AreaSummaryItem[]>(() => {
-    const summary = new Map<string, ParsedCase[]>();
+    const excelCountByArea = new Map<string, number>();
+    const newCountByArea = new Map<string, number>();
 
     cases.forEach((item) => {
       const area =
         item.resolvedArea || "Unmatched Area";
 
-      const oldCases = summary.get(area) || [];
+      excelCountByArea.set(
+        area,
+        (excelCountByArea.get(area) || 0) + 1
+      );
 
-      oldCases.push(item);
-      summary.set(area, oldCases);
+      const accountKey = normalizeText(item.accountNo);
+
+      if (
+        accountKey &&
+        !existingAccountKeys.has(accountKey)
+      ) {
+        newCountByArea.set(
+          area,
+          (newCountByArea.get(area) || 0) + 1
+        );
+      }
     });
 
-    return Array.from(summary.entries())
-      .map(([area, areaCases]) => {
+    /*
+      Union of:
+      1. Areas found in current Excel
+      2. Areas of active executives
+      3. Areas that already have assigned database cases
+
+      Isse Pustak Bajar / CRPF / other markets table me
+      tab bhi dikhenge jab current Excel me count 0 ho.
+    */
+    const allAreas = new Set<string>();
+
+    excelCountByArea.forEach((_, area) =>
+      allAreas.add(area)
+    );
+
+    agents.forEach((agent) => {
+      const area = agent.area?.trim();
+
+      if (area) {
+        allAreas.add(area);
+      }
+    });
+
+    Object.keys(existingAssignedByArea).forEach(
+      (area) => allAreas.add(area)
+    );
+
+    return Array.from(allAreas)
+      .map((area) => {
         const matchingAgents = agents.filter(
           (agent) =>
             normalizeArea(agent.area) ===
@@ -191,15 +295,32 @@ function BankImport() {
 
         return {
           area,
-          totalCases: areaCases.length,
+          excelCases:
+            excelCountByArea.get(area) || 0,
+          newCases:
+            newCountByArea.get(area) || 0,
+          existingAssignedCases:
+            existingAssignedByArea[area] || 0,
           agents: matchingAgents,
         };
       })
-      .sort(
-        (first, second) =>
-          second.totalCases - first.totalCases
-      );
-  }, [cases, agents]);
+      .sort((first, second) => {
+        const firstTotal =
+          first.existingAssignedCases +
+          first.excelCases;
+
+        const secondTotal =
+          second.existingAssignedCases +
+          second.excelCases;
+
+        return secondTotal - firstTotal;
+      });
+  }, [
+    cases,
+    agents,
+    existingAccountKeys,
+    existingAssignedByArea,
+  ]);
 
   const autoAssignedPreviewCount = useMemo(
     () =>
@@ -207,15 +328,26 @@ function BankImport() {
         (total, item) =>
           total +
           (item.agents.length > 0
-            ? item.totalCases
+            ? item.newCases
             : 0),
         0
       ),
     [areaSummary]
   );
 
+  const totalNewPreviewCount = useMemo(
+    () =>
+      areaSummary.reduce(
+        (total, item) =>
+          total + item.newCases,
+        0
+      ),
+    [areaSummary]
+  );
+
   const unassignedPreviewCount =
-    cases.length - autoAssignedPreviewCount;
+    totalNewPreviewCount -
+    autoAssignedPreviewCount;
 
   async function refreshAgentCaseCounts(
     agentIds: number[]
@@ -252,17 +384,20 @@ function BankImport() {
 
     const confirmed = window.confirm(
       [
-        "Unified Safe Bank Import",
+        "Safe Bank Import",
         "",
         `File format: ${fileFormat}`,
-        `Unique cases: ${cases.length}`,
+        `Unique cases in Excel: ${cases.length}`,
         `Excel duplicates removed: ${duplicatePreviewCount}`,
+        `Existing Account IDs skipped: ${
+          cases.length - totalNewPreviewCount
+        }`,
+        `New cases: ${totalNewPreviewCount}`,
+        `Auto assigned: ${autoAssignedPreviewCount}`,
+        `Unassigned: ${unassignedPreviewCount}`,
         `Missing addresses: ${missingAddressCount}`,
-        `Auto assigned preview: ${autoAssignedPreviewCount}`,
-        `Unassigned preview: ${unassignedPreviewCount}`,
         "",
-        "Existing Account IDs skip honge.",
-        "Same database schema har import me use hoga.",
+        "Existing agents aur existing cases delete nahi honge.",
         "",
         "Import continue karein?",
       ].join("\n")
@@ -272,19 +407,21 @@ function BankImport() {
 
     setStatus("importing");
     setImportedCount(0);
-    setSkippedCount(0);
+    setSkippedCount(
+      cases.length - totalNewPreviewCount
+    );
     setUnassignedCount(0);
 
     try {
       const activeAgents =
         await loadActiveAgents();
 
-      const existingKeys =
-        await loadExistingAccountNumbers();
+      const currentExisting =
+        await loadExistingCases();
 
       const newCases = cases.filter(
         (item) =>
-          !existingKeys.has(
+          !currentExisting.existingKeys.has(
             normalizeText(item.accountNo)
           )
       );
@@ -408,7 +545,7 @@ function BankImport() {
 
       alert(
         [
-          "Unified import complete.",
+          "Import complete.",
           "",
           `Imported: ${totalImported}`,
           `Skipped existing: ${skipped}`,
@@ -432,11 +569,11 @@ function BankImport() {
 
   return (
     <div className="module-card">
-      <h1>📄 Unified Bank Excel Import</h1>
+      <h1>📄 Safe Bank Excel Import</h1>
 
       <p>
-        Detailed aur compact dono XLS formats ek hi
-        shared import engine se process honge.
+        Current Excel cases, already assigned database cases
+        aur active market executives alag-alag dikhenge.
       </p>
 
       <hr />
@@ -485,24 +622,22 @@ function BankImport() {
           </p>
 
           <p>
-            <strong>Unique Cases:</strong>{" "}
+            <strong>Unique Excel Cases:</strong>{" "}
             {cases.length}
           </p>
 
           <p>
-            <strong>Excel Duplicates:</strong>{" "}
-            {duplicatePreviewCount}
+            <strong>Already Existing:</strong>{" "}
+            {cases.length - totalNewPreviewCount}
           </p>
 
           <p>
-            <strong>Missing Address:</strong>{" "}
-            {missingAddressCount}
+            <strong>New Cases:</strong>{" "}
+            {totalNewPreviewCount}
           </p>
 
           <p>
-            <strong>
-              Auto Assigned Preview:
-            </strong>{" "}
+            <strong>Auto Assigned Preview:</strong>{" "}
             {autoAssignedPreviewCount}
           </p>
 
@@ -511,14 +646,18 @@ function BankImport() {
             {unassignedPreviewCount}
           </p>
 
+          <p>
+            <strong>Missing Address:</strong>{" "}
+            {missingAddressCount}
+          </p>
+
           {cases.length > 0 &&
             status !== "importing" && (
               <button
                 className="primary-btn"
                 onClick={importCases}
               >
-                Auto Assign & Import{" "}
-                {cases.length} Cases
+                Import Only {totalNewPreviewCount} New Cases
               </button>
             )}
         </div>
@@ -526,15 +665,17 @@ function BankImport() {
 
       {areaSummary.length > 0 && (
         <div className="card">
-          <h3>Area-wise Distribution Preview</h3>
+          <h3>Market-wise Assignment Preview</h3>
 
           <table>
             <thead>
               <tr>
-                <th>Resolved Area</th>
-                <th>Total Cases</th>
+                <th>Market / Area</th>
+                <th>Current Excel</th>
+                <th>New Cases</th>
+                <th>Already Assigned</th>
                 <th>Active Executives</th>
-                <th>Distribution</th>
+                <th>Import Result</th>
               </tr>
             </thead>
 
@@ -545,7 +686,13 @@ function BankImport() {
                     <strong>{item.area}</strong>
                   </td>
 
-                  <td>{item.totalCases}</td>
+                  <td>{item.excelCases}</td>
+
+                  <td>{item.newCases}</td>
+
+                  <td>
+                    {item.existingAssignedCases}
+                  </td>
 
                   <td>
                     {item.agents.length > 0
@@ -553,8 +700,7 @@ function BankImport() {
                           .map(
                             (agent) =>
                               `${
-                                agent.agent_code ||
-                                ""
+                                agent.agent_code || ""
                               } ${agent.name}`
                           )
                           .join(", ")
@@ -562,9 +708,11 @@ function BankImport() {
                   </td>
 
                   <td>
-                    {item.agents.length > 0
-                      ? `✅ Equal between ${item.agents.length} agent(s)`
-                      : "⚠️ Unassigned"}
+                    {item.newCases === 0
+                      ? "No new case"
+                      : item.agents.length > 0
+                      ? `✅ ${item.newCases} case(s) assigned`
+                      : `⚠️ ${item.newCases} unassigned`}
                   </td>
                 </tr>
               ))}
@@ -575,16 +723,15 @@ function BankImport() {
 
       {cases.length > 0 && (
         <div className="card">
-          <h3>First 20 Cases Preview</h3>
+          <h3>First 20 Excel Cases Preview</h3>
 
           <table>
             <thead>
               <tr>
                 <th>Account No.</th>
                 <th>Customer</th>
-                <th>Area</th>
+                <th>Market</th>
                 <th>Category</th>
-                <th>Segment</th>
                 <th>Balance</th>
                 <th>Address</th>
               </tr>
@@ -606,9 +753,6 @@ function BankImport() {
                     <td>
                       {item.assetClassification ||
                         "-"}
-                    </td>
-                    <td>
-                      {item.accountSegment || "-"}
                     </td>
                     <td>
                       ₹

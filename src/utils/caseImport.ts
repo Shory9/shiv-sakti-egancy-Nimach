@@ -72,25 +72,19 @@ const ADDRESS_AREA_RULES: Array<{
   keywords: string[];
 }> = [
   {
-    area: "Bamaniya",
-    keywords: [
-      "BAMANIYA",
-      "BAMANIA",
-      "BAMANI",
-      "BAMANIA MANDI",
-    ],
-  },
-  {
     area: "CRPF Neemuch",
     keywords: [
       "CRPF ROAD NEEMUCH",
       "CRPF NEEMUCH",
       "CRPF ROAD",
+      "VJNEEM",
     ],
   },
   {
     area: "Pustak Bajar Neemuch",
     keywords: [
+      "PUSTAK BAJAR NEEMUCH",
+      "PUSTAK BAZAR NEEMUCH",
       "PUSTAK BAJAR",
       "PUSTAK BAZAR",
     ],
@@ -127,8 +121,19 @@ const ADDRESS_AREA_RULES: Array<{
   {
     area: "Chandni Chowk Ratlam",
     keywords: [
+      "CHANDNI CHOWK RATLAM",
       "CHANDNI CHOWK",
       "CHANDNI CHAUK",
+    ],
+  },
+  {
+    area: "Bamaniya",
+    keywords: [
+      "BAMANIYA MANDI",
+      "BAMANIA MANDI",
+      "BAMANIYA",
+      "BAMANIA",
+      "BAMANI",
     ],
   },
   {
@@ -276,15 +281,6 @@ export function parseBankAmount(
 
   const absolute = Math.abs(parsed);
 
-  /*
-    Bank ki current XLS values lakh unit me hain.
-
-    Example:
-    3.4815784 = ₹3,48,157.84
-
-    Agar future file me amount already rupees me ho,
-    jaise 348157.84, to dobara multiply nahi hoga.
-  */
   const rupeeAmount =
     absolute > 0 && absolute < 10000
       ? parsed * 100000
@@ -301,32 +297,37 @@ export function resolveCaseArea(
   branchName: string,
   address: string
 ) {
-  const normalizedAlpha =
-    normalizeText(alpha);
+  const normalizedBranch = normalizeText(branchName);
 
-  if (
-    ALPHA_AREA_MAP[normalizedAlpha]
-  ) {
-    return ALPHA_AREA_MAP[
-      normalizedAlpha
-    ];
+  // 1) Bank branch/market is the primary assignment source.
+  // This keeps all BAMANIA MANDI branch cases under Bamaniya,
+  // even when the customer address contains Petlawad or another village.
+  for (const rule of ADDRESS_AREA_RULES) {
+    const branchMatched = rule.keywords.some((keyword) =>
+      normalizedBranch.includes(normalizeText(keyword))
+    );
+
+    if (branchMatched) {
+      return rule.area;
+    }
   }
 
-  const combined = normalizeText(
-    `${branchName} ${address}`
-  );
+  // 2) Alpha code is the bank's fallback market code.
+  const normalizedAlpha = normalizeText(alpha);
 
-  for (
-    const rule of ADDRESS_AREA_RULES
-  ) {
-    const matched =
-      rule.keywords.some((keyword) =>
-        combined.includes(
-          normalizeText(keyword)
-        )
-      );
+  if (ALPHA_AREA_MAP[normalizedAlpha]) {
+    return ALPHA_AREA_MAP[normalizedAlpha];
+  }
 
-    if (matched) {
+  // 3) Address is only the final fallback when branch/alpha are missing.
+  const normalizedAddress = normalizeText(address);
+
+  for (const rule of ADDRESS_AREA_RULES) {
+    const addressMatched = rule.keywords.some((keyword) =>
+      normalizedAddress.includes(normalizeText(keyword))
+    );
+
+    if (addressMatched) {
       return rule.area;
     }
   }
