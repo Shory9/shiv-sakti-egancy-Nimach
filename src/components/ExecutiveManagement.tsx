@@ -55,6 +55,7 @@ function ExecutiveManagement() {
   const [phone, setPhone] = useState("");
   const [area, setArea] = useState("");
   const [vehicle, setVehicle] = useState("");
+  const [isAdding, setIsAdding] = useState(false);
 
   function formatAgentCode(
     id: number,
@@ -64,6 +65,10 @@ function ExecutiveManagement() {
       code ||
       "SS" + String(id).padStart(3, "0")
     );
+  }
+
+  function cleanPhone(value: string) {
+    return value.replace(/\D/g, "");
   }
 
   async function loadExecutives() {
@@ -107,25 +112,66 @@ function ExecutiveManagement() {
   }, []);
 
   async function addExecutive() {
-    if (
-      !name.trim() ||
-      !phone.trim() ||
-      !area.trim()
-    ) {
-      alert(
-        "Name, phone aur working area required hai."
-      );
+    if (isAdding) return;
+
+    const cleanName = name.trim();
+    const normalizedPhone = cleanPhone(phone);
+    const cleanArea = area.trim();
+    const cleanVehicle = vehicle.trim();
+
+    if (!cleanName || !normalizedPhone || !cleanArea) {
+      alert("Name, phone aur working area required hai.");
       return;
     }
 
-    const { data, error } =
-      await supabase
+    if (normalizedPhone.length < 10) {
+      alert("Valid mobile number enter karo.");
+      return;
+    }
+
+    setIsAdding(true);
+
+    try {
+      const { data: phoneMatch, error: phoneError } =
+        await supabase
+          .from("agents")
+          .select("id")
+          .eq("phone", normalizedPhone)
+          .limit(1);
+
+      if (phoneError) {
+        throw new Error(phoneError.message);
+      }
+
+      if (phoneMatch && phoneMatch.length > 0) {
+        alert("Is mobile number ka executive already exists.");
+        return;
+      }
+
+      const { data: nameAreaMatch, error: nameAreaError } =
+        await supabase
+          .from("agents")
+          .select("id")
+          .ilike("name", cleanName)
+          .ilike("area", cleanArea)
+          .limit(1);
+
+      if (nameAreaError) {
+        throw new Error(nameAreaError.message);
+      }
+
+      if (nameAreaMatch && nameAreaMatch.length > 0) {
+        alert("Same name aur same area ka executive already exists.");
+        return;
+      }
+
+      const { data, error } = await supabase
         .from("agents")
         .insert({
-          name: name.trim(),
-          phone: phone.trim(),
-          area: area.trim(),
-          vehicle: vehicle.trim(),
+          name: cleanName,
+          phone: normalizedPhone,
+          area: cleanArea,
+          vehicle: cleanVehicle,
           cases: 0,
           status: "Active",
           is_online: false,
@@ -133,107 +179,40 @@ function ExecutiveManagement() {
         .select()
         .single();
 
-    if (error || !data) {
-      alert(
-        "Executive add error: " +
-          (error?.message ||
-            "Unknown error")
-      );
-      return;
-    }
+      if (error || !data) {
+        throw new Error(error?.message || "Unknown error");
+      }
 
-    const agentCode =
-      "SS" +
-      String(data.id).padStart(
-        3,
-        "0"
-      );
+      const agentCode =
+        "SS" + String(data.id).padStart(3, "0");
 
-    const { error: codeError } =
-      await supabase
+      const { error: codeError } = await supabase
         .from("agents")
-        .update({
-          agent_code: agentCode,
-        })
+        .update({ agent_code: agentCode })
         .eq("id", data.id);
 
-    if (codeError) {
+      if (codeError) {
+        throw new Error(codeError.message);
+      }
+
+      setName("");
+      setPhone("");
+      setArea("");
+      setVehicle("");
+
+      await loadExecutives();
+
       alert(
-        "Agent code update error: " +
-          codeError.message
+        `Executive added successfully.\nAgent Code: ${agentCode}\nWorking Area: ${cleanArea}`
       );
-      return;
-    }
-
-    setName("");
-    setPhone("");
-    setArea("");
-    setVehicle("");
-
-    await loadExecutives();
-
-    alert(
-      `Executive added successfully.\nAgent Code: ${agentCode}\nWorking Area: ${area}`
-    );
-  }
-
-  async function deleteExecutive(
-    item: Executive
-  ) {
-    const ok = window.confirm(
-      `${formatAgentCode(
-        item.id,
-        item.agent_code
-      )} - ${
-        item.name
-      } ko permanently delete karna hai?\n\nAssigned cases delete nahi honge; Unassigned ho jayenge.`
-    );
-
-    if (!ok) return;
-
-    const { error: unassignError } =
-      await supabase
-        .from("cases")
-        .update({
-          assigned_agent: null,
-        })
-        .eq(
-          "assigned_agent",
-          item.id
-        );
-
-    if (unassignError) {
+    } catch (error) {
       alert(
-        "Executive cases unassign error: " +
-          unassignError.message
+        "Executive add error: " +
+          (error instanceof Error ? error.message : "Unknown error")
       );
-      return;
+    } finally {
+      setIsAdding(false);
     }
-
-    const { error: executiveError } =
-      await supabase
-        .from("agents")
-        .delete()
-        .eq("id", item.id);
-
-    if (executiveError) {
-      alert(
-        "Executive delete error: " +
-          executiveError.message
-      );
-      return;
-    }
-
-    setExecutives((old) =>
-      old.filter(
-        (executive) =>
-          executive.id !== item.id
-      )
-    );
-
-    alert(
-      `${item.name} delete ho gaya. Cases safe hain.`
-    );
   }
 
   async function toggleStatus(
@@ -607,8 +586,11 @@ function ExecutiveManagement() {
       <button
         className="primary-btn"
         onClick={addExecutive}
+        disabled={isAdding}
       >
-        + Add Field Executive
+        {isAdding
+          ? "Adding Executive..."
+          : "+ Add Field Executive"}
       </button>
 
       <br />
@@ -716,16 +698,6 @@ function ExecutiveManagement() {
                       ? "Deactivate"
                       : "Activate"}
                   </button>{" "}
-
-                  <button
-                    onClick={() =>
-                      deleteExecutive(
-                        item
-                      )
-                    }
-                  >
-                    Delete
-                  </button>
                 </td>
               </tr>
             )
