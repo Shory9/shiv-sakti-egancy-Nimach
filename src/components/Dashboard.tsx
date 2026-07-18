@@ -28,17 +28,34 @@ function Dashboard() {
   const [showForm, setShowForm] = useState(false);
 
   async function loadCases() {
-    const { data, error } = await supabase
-      .from("cases")
-      .select("*")
-      .order("id", { ascending: false });
+    const pageSize = 1000;
+    let from = 0;
+    let allCases: SupabaseCase[] = [];
 
-    if (error) {
-      alert("Cases load error: " + error.message);
-      return;
+    while (true) {
+      const { data, error } = await supabase
+        .from("cases")
+        .select("*")
+        .order("id", { ascending: false })
+        .range(from, from + pageSize - 1);
+
+      if (error) {
+        alert("Cases load error: " + error.message);
+        return;
+      }
+
+      const currentPage = (data || []) as SupabaseCase[];
+
+      allCases = [...allCases, ...currentPage];
+
+      if (currentPage.length < pageSize) {
+        break;
+      }
+
+      from += pageSize;
     }
 
-    const convertedCases: CaseItem[] = (data as SupabaseCase[]).map((item) => ({
+    const convertedCases: CaseItem[] = allCases.map((item) => ({
       id: item.id,
       customer: item.customer_name,
       phone: item.mobile || "",
