@@ -300,8 +300,8 @@ export function resolveCaseArea(
   const normalizedBranch = normalizeText(branchName);
 
   // 1) Bank branch/market is the primary assignment source.
-  // This keeps all BAMANIA MANDI branch cases under Bamaniya,
-  // even when the customer address contains Petlawad or another village.
+  // Example: BAMANIA MANDI branch cases stay in Bamaniya even when
+  // the customer's address contains Petlawad or another nearby place.
   for (const rule of ADDRESS_AREA_RULES) {
     const branchMatched = rule.keywords.some((keyword) =>
       normalizedBranch.includes(normalizeText(keyword))
@@ -312,14 +312,15 @@ export function resolveCaseArea(
     }
   }
 
-  // 2) Alpha code is the bank's fallback market code.
+  // 2) Alpha is the bank market-code fallback.
+  // Special Alpha codes such as DBMSUR and VJNEEM still remain separate.
   const normalizedAlpha = normalizeText(alpha);
 
   if (ALPHA_AREA_MAP[normalizedAlpha]) {
     return ALPHA_AREA_MAP[normalizedAlpha];
   }
 
-  // 3) Address is only the final fallback when branch/alpha are missing.
+  // 3) Address is used only when branch and Alpha do not resolve an area.
   const normalizedAddress = normalizeText(address);
 
   for (const rule of ADDRESS_AREA_RULES) {

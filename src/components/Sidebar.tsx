@@ -20,26 +20,17 @@ function Sidebar({
 }: SidebarProps) {
   return (
     <aside className="sidebar">
-      <div style={{ textAlign: "center", marginBottom: "20px" }}>
-  <img
-    src="/logo.png"
-    alt="Shiv Shakti Recovery"
-    style={{
-      width: "180px",
-      height: "auto",
-      display: "block",
-      margin: "0 auto",
-    }}
-  />
-</div>
-      
+      <div className="sidebar-logo">
+        <img
+          src="/logo.png"
+          alt="Shiv Shakti Recovery"
+        />
+      </div>
 
       {menus.map((menu) => (
         <button
           key={menu}
-          className={
-            activeMenu === menu ? "active" : ""
-          }
+          className={activeMenu === menu ? "active" : ""}
           onClick={() => setActiveMenu(menu)}
         >
           {menu}

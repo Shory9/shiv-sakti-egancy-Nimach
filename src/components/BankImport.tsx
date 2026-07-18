@@ -163,7 +163,12 @@ function BankImport() {
 
       if (!area) return;
 
-      counts[area] = (counts[area] || 0) + 1;
+      const areaKey = normalizeArea(area);
+
+      if (!areaKey) return;
+
+      counts[areaKey] =
+        (counts[areaKey] || 0) + 1;
     });
 
     return counts;
@@ -281,9 +286,11 @@ function BankImport() {
       }
     });
 
-    Object.keys(existingAssignedByArea).forEach(
-      (area) => allAreas.add(area)
-    );
+    /*
+      existingAssignedByArea uses normalized internal keys.
+      Agent areas are already added above as display names, so normalized
+      keys must not be added to the visible area list.
+    */
 
     return Array.from(allAreas)
       .map((area) => {
@@ -300,7 +307,9 @@ function BankImport() {
           newCases:
             newCountByArea.get(area) || 0,
           existingAssignedCases:
-            existingAssignedByArea[area] || 0,
+            existingAssignedByArea[
+              normalizeText(area)
+            ] || 0,
           agents: matchingAgents,
         };
       })
@@ -441,8 +450,32 @@ function BankImport() {
         return;
       }
 
-      const areaRoundRobin =
-        new Map<string, number>();
+      /*
+        Start with each active executive's real existing workload.
+        Every new case goes to the least-loaded active executive of the
+        resolved market. This keeps repeated imports balanced and avoids
+        always starting from the first executive.
+      */
+      const agentWorkload = new Map<number, number>();
+
+      activeAgents.forEach((agent) => {
+        agentWorkload.set(agent.id, 0);
+      });
+
+      currentExisting.existingRows.forEach((existingCase) => {
+        if (!existingCase.assigned_agent) return;
+
+        const agentId = Number(
+          existingCase.assigned_agent
+        );
+
+        if (!agentWorkload.has(agentId)) return;
+
+        agentWorkload.set(
+          agentId,
+          (agentWorkload.get(agentId) || 0) + 1
+        );
+      });
 
       const assignedAgentIds: number[] = [];
       let unassigned = 0;
@@ -458,20 +491,25 @@ function BankImport() {
         let selectedAgent: Agent | undefined;
 
         if (matchingAgents.length > 0) {
-          const currentIndex =
-            areaRoundRobin.get(
-              item.resolvedArea
-            ) || 0;
+          selectedAgent = [...matchingAgents].sort(
+            (first, second) => {
+              const firstLoad =
+                agentWorkload.get(first.id) || 0;
 
-          selectedAgent =
-            matchingAgents[
-              currentIndex %
-                matchingAgents.length
-            ];
+              const secondLoad =
+                agentWorkload.get(second.id) || 0;
 
-          areaRoundRobin.set(
-            item.resolvedArea,
-            currentIndex + 1
+              if (firstLoad !== secondLoad) {
+                return firstLoad - secondLoad;
+              }
+
+              return first.id - second.id;
+            }
+          )[0];
+
+          agentWorkload.set(
+            selectedAgent.id,
+            (agentWorkload.get(selectedAgent.id) || 0) + 1
           );
 
           assignedAgentIds.push(
@@ -572,8 +610,8 @@ function BankImport() {
       <h1>📄 Safe Bank Excel Import</h1>
 
       <p>
-        Current Excel cases, already assigned database cases
-        aur active market executives alag-alag dikhenge.
+        Branch/market ke hisab se cases resolve honge aur har market ke
+        active executives me existing workload dekhkar balanced assignment hoga.
       </p>
 
       <hr />
