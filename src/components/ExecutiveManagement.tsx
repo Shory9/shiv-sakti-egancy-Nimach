@@ -21,6 +21,7 @@ type Executive = {
   vehicle: string;
   cases: number;
   status: "Active" | "Inactive";
+  approval_status?: "Pending" | "Approved" | "Rejected" | null;
   is_online?: boolean | null;
   last_seen?: string | null;
 };
@@ -99,6 +100,11 @@ function ExecutiveManagement() {
           item.status === "Inactive"
             ? "Inactive"
             : "Active",
+        approval_status:
+          item.approval_status === "Pending" ||
+          item.approval_status === "Rejected"
+            ? item.approval_status
+            : "Approved",
         is_online: Boolean(
           item.is_online
         ),
@@ -174,6 +180,7 @@ function ExecutiveManagement() {
           vehicle: cleanVehicle,
           cases: 0,
           status: "Active",
+          approval_status: "Approved",
           is_online: false,
         })
         .select()
@@ -257,6 +264,81 @@ function ExecutiveManagement() {
           : executive
       )
     );
+  }
+
+  async function approveExecutive(item: Executive) {
+    const confirmed = window.confirm(
+      `${formatAgentCode(item.id, item.agent_code)} - ${item.name} ko approve karke Active karna hai?`
+    );
+
+    if (!confirmed) return;
+
+    const { error } = await supabase
+      .from("agents")
+      .update({
+        approval_status: "Approved",
+        status: "Active",
+      })
+      .eq("id", item.id);
+
+    if (error) {
+      alert("Approval error: " + error.message);
+      return;
+    }
+
+    await loadExecutives();
+    alert("Executive approved successfully.");
+  }
+
+  async function rejectExecutive(item: Executive) {
+    const confirmed = window.confirm(
+      `${formatAgentCode(item.id, item.agent_code)} - ${item.name} ki registration reject karni hai?`
+    );
+
+    if (!confirmed) return;
+
+    const { error } = await supabase
+      .from("agents")
+      .update({
+        approval_status: "Rejected",
+        status: "Inactive",
+        is_online: false,
+        session_token: null,
+      })
+      .eq("id", item.id);
+
+    if (error) {
+      alert("Reject error: " + error.message);
+      return;
+    }
+
+    await loadExecutives();
+    alert("Executive registration rejected.");
+  }
+
+  async function resetExecutiveDevice(item: Executive) {
+    const confirmed = window.confirm(
+      `${formatAgentCode(item.id, item.agent_code)} - ${item.name} ka purana device logout karke naya login allow karna hai?`
+    );
+
+    if (!confirmed) return;
+
+    const { error } = await supabase
+      .from("agents")
+      .update({
+        session_token: null,
+        is_online: false,
+        last_seen: new Date().toISOString(),
+      })
+      .eq("id", item.id);
+
+    if (error) {
+      alert("Reset Device error: " + error.message);
+      return;
+    }
+
+    await loadExecutives();
+    alert("Device reset ho gaya. Executive ab naye mobile me login kar sakta hai.");
   }
 
   async function loadExistingAccountNumbers() {
@@ -610,6 +692,7 @@ function ExecutiveManagement() {
             <th>Upload Cases</th>
             <th>Live Status</th>
             <th>Last Seen</th>
+            <th>Approval</th>
             <th>Account Status</th>
             <th>Action</th>
           </tr>
@@ -682,22 +765,63 @@ function ExecutiveManagement() {
                 </td>
 
                 <td>
+                  {item.approval_status === "Pending"
+                    ? "🟡 Pending"
+                    : item.approval_status === "Rejected"
+                    ? "🔴 Rejected"
+                    : "🟢 Approved"}
+                </td>
+
+                <td>
                   {item.status}
                 </td>
 
                 <td>
+                  {item.approval_status === "Pending" && (
+                    <>
+                      <button
+                        onClick={() => approveExecutive(item)}
+                      >
+                        Approve
+                      </button>{" "}
+                      <button
+                        onClick={() => rejectExecutive(item)}
+                      >
+                        Reject
+                      </button>{" "}
+                    </>
+                  )}
+
+                  {item.approval_status === "Rejected" && (
+                    <>
+                      <button
+                        onClick={() => approveExecutive(item)}
+                      >
+                        Approve
+                      </button>{" "}
+                    </>
+                  )}
+
                   <button
                     onClick={() =>
                       toggleStatus(
                         item
                       )
                     }
+                    disabled={item.approval_status !== "Approved"}
                   >
                     {item.status ===
                     "Active"
                       ? "Deactivate"
                       : "Activate"}
                   </button>{" "}
+
+                  <button
+                    onClick={() => resetExecutiveDevice(item)}
+                    disabled={item.approval_status !== "Approved"}
+                  >
+                    Reset Device
+                  </button>
                 </td>
               </tr>
             )
@@ -706,7 +830,7 @@ function ExecutiveManagement() {
           {executives.length ===
             0 && (
             <tr>
-              <td colSpan={11}>
+              <td colSpan={12}>
                 No executives added
                 yet.
               </td>

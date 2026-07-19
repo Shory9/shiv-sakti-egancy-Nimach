@@ -20,6 +20,7 @@ type Mode = "login" | "register";
 type SecureExecutive = Executive & {
   agent_code?: string | null;
   status?: string | null;
+  approval_status?: "Pending" | "Approved" | "Rejected" | null;
   password?: string | null;
   session_token?: string | null;
   last_latitude?: string | null;
@@ -204,6 +205,21 @@ function ExecutiveApp() {
   }
 
   async function startSession(agent: SecureExecutive) {
+    if (agent.approval_status === "Pending") {
+      alert("Registration pending hai. Admin approval ka wait karo.");
+      return false;
+    }
+
+    if (agent.approval_status === "Rejected") {
+      alert("Registration reject ho chuki hai. Admin se contact karo.");
+      return false;
+    }
+
+    if (agent.approval_status !== "Approved") {
+      alert("Account approved nahi hai. Admin se contact karo.");
+      return false;
+    }
+
     if (agent.status !== "Active") {
       alert("Account inactive hai. Admin se contact karo.");
       return false;
@@ -225,6 +241,7 @@ function ExecutiveApp() {
       })
       .eq("id", agent.id)
       .eq("status", "Active")
+      .eq("approval_status", "Approved")
       .is("session_token", null)
       .select("*")
       .maybeSingle();
@@ -275,6 +292,7 @@ function ExecutiveApp() {
         .select("*")
         .eq("id", Number(parsed.executive.id))
         .eq("status", "Active")
+        .eq("approval_status", "Approved")
         .eq("session_token", parsed.token)
         .maybeSingle();
 
@@ -373,6 +391,21 @@ function ExecutiveApp() {
           : null;
 
       if (existing) {
+        if (existing.approval_status === "Pending") {
+          alert("Registration request pending hai. Admin approval ka wait karo.");
+          return;
+        }
+
+        if (existing.approval_status === "Rejected") {
+          alert("Registration request reject ho chuki hai. Admin se contact karo.");
+          return;
+        }
+
+        if (existing.approval_status !== "Approved") {
+          alert("Account approved nahi hai. Admin se contact karo.");
+          return;
+        }
+
         if (existing.status !== "Active") {
           alert("Ye account inactive hai. Admin se contact karo.");
           return;
@@ -448,7 +481,8 @@ function ExecutiveApp() {
           area: cleanArea,
           vehicle: cleanVehicle,
           password,
-          status: "Active",
+          status: "Inactive",
+          approval_status: "Pending",
           cases: 0,
           is_online: false,
           session_token: null,
@@ -478,11 +512,18 @@ function ExecutiveApp() {
         );
       }
 
-      const newAgent = updatedAgent as unknown as SecureExecutive;
+      alert(
+        `Registration request submitted.\nAgent Code: ${agentCode}\nAdmin approval ke baad login kar sakte ho.`
+      );
 
-      alert(`Registration successful.\nAgent Code: ${agentCode}`);
-
-      await startSession(newAgent);
+      setMode("login");
+      setLoginText(agentCode);
+      setName("");
+      setPhone("");
+      setArea("");
+      setVehicle("");
+      setPassword("");
+      setConfirmPassword("");
     } catch (error) {
       alert(
         "Register error: " +
@@ -510,7 +551,8 @@ function ExecutiveApp() {
         .from("agents")
         .select("*")
         .eq("password", password)
-        .eq("status", "Active");
+        .eq("status", "Active")
+        .eq("approval_status", "Approved");
 
       if (/^SS\d+$/i.test(value)) {
         query = query.eq("agent_code", value.toUpperCase());
@@ -526,7 +568,7 @@ function ExecutiveApp() {
 
       if (!data) {
         alert(
-          "Wrong Agent Code / Phone / Password, ya account inactive hai."
+          "Wrong Agent Code / Phone / Password, account inactive hai, ya admin approval pending hai."
         );
         return;
       }
